@@ -8,16 +8,36 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # ufh-controller-wifi is the bench-test variant (Wi-Fi instead of Ethernet).
+        config: [ufh-controller, ufh-controller-wifi]
     steps:
       - uses: actions/checkout@v7
-      - name: Dummy secrets for CI
+      # Real secrets come from the repo's Actions secrets. They aren't available on
+      # pull requests from forks, so fall back to throwaway values there; that
+      # firmware compiles but can't talk to HA, so its artifact is named -untrusted.
+      - name: Write secrets.yaml
+        env:
+          API_ENCRYPTION_KEY: ${{ secrets.API_ENCRYPTION_KEY }}
+          WEB_PASSWORD: ${{ secrets.WEB_PASSWORD }}
         run: |
           python3 - <<'PY'
-          import base64, secrets
+          import base64, json, os, secrets
+          key = os.environ["API_ENCRYPTION_KEY"].strip()
+          password = os.environ["WEB_PASSWORD"]
+          real = bool(key and password)
+          if not real:
+              print("::warning::Repo secrets not set; building with throwaway secrets. Don't flash this firmware.")
+              key = base64.b64encode(secrets.token_bytes(32)).decode()
+              password = "ci-only"
           open("secrets.yaml", "w").write(
-              f'api_encryption_key: "{base64.b64encode(secrets.token_bytes(32)).decode()}"\n'
-              'web_password: "ci-only"\n'
+              f"api_encryption_key: {json.dumps(key)}\n"
+              f"web_password: {json.dumps(password)}\n"
           )
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"ARTIFACT_SUFFIX={'' if real else '-untrusted'}\n")
           PY
       - uses: actions/setup-python@v7
         with:
@@ -25,10 +45,10 @@ jobs:
       - name: Install ESPHome
         run: pip install esphome
       - name: Compile
-        run: esphome compile ufh-controller.yaml
+        run: esphome compile ${{ matrix.config }}.yaml
       - name: Upload firmware
         uses: actions/upload-artifact@v7
         with:
-          name: ufh-controller-firmware
+          name: ${{ matrix.config }}-firmware${{ env.ARTIFACT_SUFFIX }}
           path: .esphome/build/ufh-controller/**/firmware*.bin
           if-no-files-found: warn
