@@ -1,0 +1,24 @@
+# Wi-Fi variant of ufh-controller.yaml, for bench testing without an Ethernet cable.
+# Same device name, entities and keys; only the network differs. ESPHome can't run
+# Ethernet and Wi-Fi together, so flash ufh-controller.yaml once Ethernet is available.
+#
+# The board's ESP32-S3-WROOM-1U has no PCB antenna: fit an antenna to the SMA socket.
+#
+# No Wi-Fi password is built in. Set it after flashing, either:
+#   - over USB, in the "Connect to Wi-Fi" step that web.esphome.io offers (Improv), or
+#   - by joining the "UFH Controller Setup" hotspot the board opens when it has no
+#     Wi-Fi, and picking the network on the page that appears.
+# The board stores the credentials in flash, so OTA updates keep them.
+
+packages:
+  base: !include ufh-controller.yaml
+
+ethernet: !remove
+
+wifi:
+  ap:
+    ssid: "UFH Controller Setup"
+
+captive_portal:
+
+improv_serial:
