@@ -1,0 +1,319 @@
+# Underfloor heating controller
+# Board: Waveshare ESP32-S3-POE-ETH-8DI-8RO (ESP32-S3-WROOM-1U-N16R8)
+# See README.md for the pin map and wiring.
+
+substitutions:
+  name: ufh-controller
+  friendly_name: UFH Controller
+  # Servo bus. SCS servos ship at 1000000 baud; drop to 115200 if a level shifter is in the path
+  # (the servo's own baud register must be changed to match).
+  servo_baud: "1000000"
+  servo_id: "1"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2025.11.0
+  project:
+    name: ifold-estate.ufh-controller
+    version: "0.1.0"
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [scs_servo]
+
+# Logs go to USB-C (USB Serial/JTAG) so UART0 (header Tx/Rx, GPIO43/44) stays free as a spare console.
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    encryption: {}   # reuses the API encryption key
+
+web_server:
+  port: 80
+  version: 3
+  auth:
+    username: admin
+    password: !secret web_password
+
+# ---------------------------------------------------------------- Network (W5500 over SPI)
+ethernet:
+  type: W5500
+  clk_pin: GPIO15
+  mosi_pin: GPIO13
+  miso_pin: GPIO14
+  cs_pin: GPIO16
+  interrupt_pin: GPIO12
+  clock_speed: 25MHz
+
+# ---------------------------------------------------------------- Buses
+i2c:
+  id: i2c_bus
+  sda: GPIO42
+  scl: GPIO41
+  frequency: 100kHz
+
+# Display SPI bus on the TF-card pins (no TF card is used). Separate from the W5500 bus.
+spi:
+  id: lcd_spi
+  interface: SPI3
+  clk_pin: GPIO48
+  mosi_pin: GPIO47
+
+uart:
+  id: servo_uart
+  tx_pin: GPIO1
+  rx_pin: GPIO2
+  baud_rate: ${servo_baud}
+
+one_wire:
+  - platform: gpio
+    pin: GPIO21
+
+# ---------------------------------------------------------------- Relay expander (TCA9554 @ 0x20)
+pca9554:
+  - id: relay_expander
+    address: 0x20
+
+time:
+  - platform: pcf85063
+    id: rtc_time
+  - platform: homeassistant
+    id: ha_time
+    on_time_sync:
+      then:
+        - pcf85063.write_time:
+            id: rtc_time
+
+# ---------------------------------------------------------------- Relays (all OFF at boot)
+switch:
+  - platform: gpio
+    id: relay1
+    name: "Relay 1"
+    restore_mode: ALWAYS_OFF
+    pin: { pca9554: relay_expander, number: 0 }
+  - platform: gpio
+    id: relay2
+    name: "Relay 2"
+    restore_mode: ALWAYS_OFF
+    pin: { pca9554: relay_expander, number: 1 }
+  - platform: gpio
+    id: relay3
+    name: "Relay 3"
+    restore_mode: ALWAYS_OFF
+    pin: { pca9554: relay_expander, number: 2 }
+  - platform: gpio
+    id: relay4
+    name: "Relay 4"
+    restore_mode: ALWAYS_OFF
+    pin: { pca9554: relay_expander, number: 3 }
+  - platform: gpio
+    id: relay5
+    name: "Relay 5"
+    restore_mode: ALWAYS_OFF
+    pin: { pca9554: relay_expander, number: 4 }
+  - platform: gpio
+    id: relay6
+    name: "Relay 6"
+    restore_mode: ALWAYS_OFF
+    pin: { pca9554: relay_expander, number: 5 }
+  - platform: gpio
+    id: relay7
+    name: "Relay 7"
+    restore_mode: ALWAYS_OFF
+    pin: { pca9554: relay_expander, number: 6 }
+  - platform: gpio
+    id: relay8
+    name: "Relay 8"
+    restore_mode: ALWAYS_OFF
+    pin: { pca9554: relay_expander, number: 7 }
+
+  - platform: scs_servo
+    name: "Mixer servo torque"
+    restore_mode: ALWAYS_OFF
+
+# ---------------------------------------------------------------- Digital inputs (opto-isolated)
+binary_sensor:
+  - platform: gpio
+    id: di1
+    name: "Input 1"
+    pin: { number: GPIO4, inverted: true, mode: { input: true, pullup: true } }
+    filters: [delayed_on_off: 50ms]
+  - platform: gpio
+    id: di2
+    name: "Input 2"
+    pin: { number: GPIO5, inverted: true, mode: { input: true, pullup: true } }
+    filters: [delayed_on_off: 50ms]
+  - platform: gpio
+    id: di3
+    name: "Input 3"
+    pin: { number: GPIO6, inverted: true, mode: { input: true, pullup: true } }
+    filters: [delayed_on_off: 50ms]
+  - platform: gpio
+    id: di4
+    name: "Input 4"
+    pin: { number: GPIO7, inverted: true, mode: { input: true, pullup: true } }
+    filters: [delayed_on_off: 50ms]
+  - platform: gpio
+    id: di5
+    name: "Input 5"
+    pin: { number: GPIO8, inverted: true, mode: { input: true, pullup: true } }
+    filters: [delayed_on_off: 50ms]
+  - platform: gpio
+    id: di6
+    name: "Input 6"
+    pin: { number: GPIO9, inverted: true, mode: { input: true, pullup: true } }
+    filters: [delayed_on_off: 50ms]
+  - platform: gpio
+    id: di7
+    name: "Input 7"
+    pin: { number: GPIO10, inverted: true, mode: { input: true, pullup: true } }
+    filters: [delayed_on_off: 50ms]
+  - platform: gpio
+    id: di8
+    name: "Input 8"
+    pin: { number: GPIO11, inverted: true, mode: { input: true, pullup: true } }
+    filters: [delayed_on_off: 50ms]
+
+  - platform: status
+    name: "Status"
+
+# ---------------------------------------------------------------- Mixer servo (SC15 via Bus Servo Adapter A)
+scs_servo:
+  - id: mixer_servo
+    uart_id: servo_uart
+    servo_id: ${servo_id}
+    update_interval: 2s
+    position:
+      id: mixer_position
+      name: "Mixer servo position"
+    load:
+      id: mixer_load
+      name: "Mixer servo load"
+    voltage:
+      name: "Mixer servo voltage"
+    temperature:
+      name: "Mixer servo temperature"
+
+number:
+  - platform: scs_servo
+    name: "Mixer servo target"
+    mode: box
+
+# ---------------------------------------------------------------- Temperatures (DS18B20 on GPIO21)
+# Addresses are printed in the log at boot. Add one entry per sensor, e.g.:
+# sensor:
+#   - platform: dallas_temp
+#     address: 0x1c0000031edd2a28
+#     name: "Flow temperature"
+#     update_interval: 10s
+sensor:
+  - platform: dallas_temp
+    id: temp_probe_1
+    name: "Temperature probe 1"
+    update_interval: 10s
+
+  - platform: uptime
+    name: "Uptime"
+
+# ---------------------------------------------------------------- Indicators
+output:
+  - platform: ledc
+    id: buzzer_out
+    pin: GPIO46
+
+rtttl:
+  output: buzzer_out
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: status_rgb
+    name: "Status LED"
+    pin: GPIO38
+    num_leds: 1
+    chipset: WS2812
+    channel_colors: GRB
+    restore_mode: ALWAYS_OFF
+
+# ---------------------------------------------------------------- LCD (Waveshare 2.4" ILI9341, 240x320)
+# CS tied to GND, RST tied to 3V3, BL tied to 3V3 (see README).
+font:
+  - file: "fonts/DejaVuSans.ttf"
+    id: font_small
+    size: 18
+  - file: "fonts/DejaVuSans-Bold.ttf"
+    id: font_big
+    size: 28
+
+color:
+  - id: c_on
+    hex: "33cc66"
+  - id: c_off
+    hex: "555555"
+  - id: c_text
+    hex: "ffffff"
+  - id: c_dim
+    hex: "aaaaaa"
+
+display:
+  - platform: mipi_spi
+    id: lcd
+    model: ILI9341
+    spi_id: lcd_spi
+    dc_pin: GPIO3
+    data_rate: 20MHz
+    rotation: 90
+    update_interval: 2s
+    lambda: |-
+      it.fill(Color::BLACK);
+      it.print(8, 6, id(font_big), id(c_text), "UFH Controller");
+
+      // Relays
+      auto relay_box = [&](int idx, bool on) {
+        int x = 8 + (idx % 4) * 78;
+        int y = 50 + (idx / 4) * 40;
+        it.filled_rectangle(x, y, 72, 34, on ? id(c_on) : id(c_off));
+        it.printf(x + 36, y + 17, id(font_small), id(c_text), TextAlign::CENTER, "R%d", idx + 1);
+      };
+      relay_box(0, id(relay1).state); relay_box(1, id(relay2).state);
+      relay_box(2, id(relay3).state); relay_box(3, id(relay4).state);
+      relay_box(4, id(relay5).state); relay_box(5, id(relay6).state);
+      relay_box(6, id(relay7).state); relay_box(7, id(relay8).state);
+
+      // Inputs
+      bool di[8] = {id(di1).state, id(di2).state, id(di3).state, id(di4).state,
+                    id(di5).state, id(di6).state, id(di7).state, id(di8).state};
+      it.print(8, 140, id(font_small), id(c_dim), "Inputs");
+      for (int i = 0; i < 8; i++) {
+        int cx = 90 + i * 28;
+        if (di[i]) it.filled_circle(cx, 150, 9, id(c_on));
+        else it.circle(cx, 150, 9, id(c_off));
+      }
+
+      // Temperature and mixer
+      if (id(temp_probe_1).has_state())
+        it.printf(8, 175, id(font_small), id(c_text), "Probe 1: %.1f °C", id(temp_probe_1).state);
+      else
+        it.print(8, 175, id(font_small), id(c_dim), "Probe 1: --");
+      if (id(mixer_servo).is_online())
+        it.printf(8, 200, id(font_small), id(c_text), "Mixer: %d  load %.0f%%",
+                  id(mixer_servo).last_position(), id(mixer_servo).last_load_percent());
+      else
+        it.print(8, 200, id(font_small), id(c_dim), "Mixer: offline");
