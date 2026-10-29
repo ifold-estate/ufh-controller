@@ -9,7 +9,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Dummy secrets for CI
         run: |
           python3 - <<'PY'
@@ -19,7 +19,7 @@ jobs:
               'web_password: "ci-only"\n'
           )
           PY
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install ESPHome
@@ -27,7 +27,7 @@ jobs:
       - name: Compile
         run: esphome compile ufh-controller.yaml
       - name: Upload firmware
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ufh-controller-firmware
           path: .esphome/build/ufh-controller/**/firmware*.bin
