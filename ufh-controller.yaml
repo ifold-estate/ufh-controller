@@ -249,7 +249,7 @@ light:
     pin: GPIO38
     num_leds: 1
     chipset: WS2812
-    channel_colors: GRB
+    channel_colors: RGB  # GRB swapped red and green on this board
     restore_mode: ALWAYS_OFF
 
 # ---------------------------------------------------------------- LCD (Waveshare 2.4" ILI9341, 240x320)

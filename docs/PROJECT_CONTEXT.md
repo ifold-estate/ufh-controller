@@ -132,8 +132,9 @@ Verification so far:
 - The servo C++ was syntax-checked on its own.
 - CI compiles both the Ethernet and Wi-Fi variants.
 - Bench test so far (Wi-Fi variant, flashed over USB then OTA): Wi-Fi, the encrypted API and OTA
-  work, the TCA9554 (0x20) and RTC (0x51) respond on I2C, and the LCD test page displays. HA
-  discovery, relays, DIs, DS18B20s, the servo and Ethernet are not confirmed yet.
+  work, the TCA9554 (0x20) and RTC (0x51) respond on I2C, and the LCD test page displays.
+  Relays 1–8 click from the web page, with their LEDs and the LCD following. The status LED is RGB
+  order, not GRB. HA discovery, DIs, DS18B20s, the servo and Ethernet are not confirmed yet.
 
 ## 6. Environment notes (for Claude sessions)
 
