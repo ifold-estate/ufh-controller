@@ -102,6 +102,11 @@ Repository: `ifold-estate/ufh-controller`
   - The PCF85063 RTC (set from HA time), status, uptime, buzzer (RTTTL) and RGB LED
   - One DS18B20 placeholder (add addresses from the boot log)
   - The servo entities, and an LCD test page (relays, inputs, probe, mixer)
+- `ufh-controller-wifi.yaml` is a bench-test variant. It includes the main config, swaps Ethernet
+  for Wi-Fi (ESPHome can't run both at once), and has no Wi-Fi password built in. The password is set
+  after flashing, over USB (Improv on web.esphome.io) or through the "UFH Controller Setup" hotspot.
+  Wi-Fi needs an antenna on the board's SMA socket, since the WROOM-1U has no PCB antenna. CI builds
+  both variants.
 - `components/scs_servo/` is a custom external component implementing the Feetech SCS protocol
   (big-endian registers, echo-tolerant half-duplex).
   - Registers: torque 40, goal position 42, present position 56, speed 58, load 60 (bit 10 is the
@@ -113,6 +118,9 @@ Repository: `ifold-estate/ufh-controller`
 - `secrets.yaml` is not committed. `secrets.example.yaml` holds `api_encryption_key` and
   `web_password`.
 - `.github/workflows/build.yml` compiles the firmware on every push and uploads the `.bin` files.
+  It builds `secrets.yaml` from the repo's Actions secrets `API_ENCRYPTION_KEY` and `WEB_PASSWORD`.
+  If those are missing (for example, a PR from a fork), it falls back to throwaway values and names
+  the artifact `ufh-controller-firmware-untrusted`. Don't flash that one.
 
 Verification so far:
 
