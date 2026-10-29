@@ -3,7 +3,7 @@
 This file carries the decisions and background from the first working session, so a new session
 (human or Claude) can pick up the project. Keep it updated as decisions change.
 
-_Last updated: 29 Oct 2026, after v0.1 (hardware layer)._
+_Last updated: 29 Oct 2026, after the first bench test (LCD working over Wi-Fi)._
 
 ---
 
@@ -49,8 +49,11 @@ Jon does the wiring, flashing and testing.
    (preferred) or a 24 Vdc DIN-rail PSU (e.g. Mean Well HDR-15-24).
 6. **Logs go to USB Serial/JTAG**, so UART0 (header Tx/Rx, GPIO43/44) stays free as a spare console.
    The servo isn't on UART0 because the boot ROM prints its log on GPIO43.
-7. **The LCD uses the TF-card pins (47/48)**, so the TF card is not used. CS, RST and BL are tied to
-   fixed levels, so there's no backlight control.
+7. **The LCD uses the TF-card pins (47/48)**, so the TF card is not used. CS and BL are tied to fixed
+   levels, so there's no backlight control. RST must be driven from GPIO0: with CS tied low and
+   RST tied high, the panel stayed white, since it can't resync after stray clock edges at power-up.
+   GPIO0 (BOOT) is high at power-on, so sharing it with the LCD reset is safe. The display runs at
+   10 MHz in SPI mode 0 (set while debugging; keep them unless there's a reason to change).
 8. **Servo baud rate:** SCS servos ship at 1 Mbps. If a BSS138-type level shifter is needed and is
    marginal at 1 Mbps, change the servo to 115200 baud and set `servo_baud`.
 
@@ -87,9 +90,10 @@ Project allocation:
 | GPIO48 | LCD CLK (SPI3) |
 | GPIO47 | LCD DIN (SPI3) |
 | GPIO3 | LCD DC (strapping pin, fine as an output) |
-| LCD CS → G, RST → 3V3, BL → 3V3, VCC → 3V3 | |
+| GPIO0 | LCD RST (BOOT pin; pressing BOOT also resets the LCD) |
+| LCD CS → G, BL → 3V3, VCC → 3V3 | |
 | GPIO43/44 | Spare console, keep free |
-| GPIO45, GPIO0 | Avoid (strapping pins) |
+| GPIO45 | Avoid (strapping pin for flash voltage) |
 | Spare | None left on the header. I2C (41/42) can take more devices. |
 
 ## 5. Code status (v0.1)
@@ -126,9 +130,10 @@ Verification so far:
 
 - `esphome config` passes on ESPHome 2026.10.1.
 - The servo C++ was syntax-checked on its own.
-- **A full compile has not run yet.** The first CI run is the real test. Watch the display lambda in
-  particular, since `mipi_spi` with no CS pin defaults to SPI MODE3.
-- Nothing has been tested on hardware yet.
+- CI compiles both the Ethernet and Wi-Fi variants.
+- Bench test so far (Wi-Fi variant, flashed over USB then OTA): HA discovery works, the TCA9554
+  (0x20) and RTC (0x51) respond on I2C, and the LCD test page displays. Relays, DIs, DS18B20s, the
+  servo and Ethernet are not tested yet.
 
 ## 6. Environment notes (for Claude sessions)
 
@@ -158,7 +163,7 @@ Verification so far:
 
 **Next work:**
 
-1. Push v0.1, let CI compile it, and fix any build errors.
+1. ~~Push v0.1, let CI compile it, and fix any build errors.~~ Done.
 2. Bench test: flash over USB-C, check Ethernet, HA discovery, relays, DIs and the LCD.
 3. Servo bring-up: ping, read position and load, move it, then tune the response timeout and baud.
 4. Limit-finding routine: drive slowly to each end until the load rises, store the end-stop

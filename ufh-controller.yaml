@@ -253,7 +253,9 @@ light:
     restore_mode: ALWAYS_OFF
 
 # ---------------------------------------------------------------- LCD (Waveshare 2.4" ILI9341, 240x320)
-# CS tied to GND, RST tied to 3V3, BL tied to 3V3 (see README).
+# CS tied to GND, BL tied to 3V3 (see README). RST is on GPIO0 (the BOOT pin, high at power-on, so
+# safe to share): with CS tied low the panel can't resync on its own, so it needs a hardware reset
+# after the SPI pins are set up.
 font:
   - file: "fonts/DejaVuSans.ttf"
     id: font_small
@@ -278,7 +280,9 @@ display:
     model: ILI9341
     spi_id: lcd_spi
     dc_pin: GPIO3
-    data_rate: 20MHz
+    reset_pin: GPIO0
+    data_rate: 10MHz
+    spi_mode: MODE0
     rotation: 90
     update_interval: 2s
     lambda: |-

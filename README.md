@@ -57,7 +57,8 @@ Bottom: Vbus G    DP   DN   3V3  G    Tx   Rx   3V3  G    0    1    2    3
 | 3 | 3 | LCD **DC** |
 | Tx / Rx | 43 / 44 | Kept free — spare serial console |
 | SCL / SDA | 41 / 42 | Shared I2C bus — available for extra I2C devices |
-| 45, 0 | — | Strapping pins — do not use |
+| 45 | — | Strapping pin — do not use |
+| 0 | LCD RST | BOOT button / strapping pin; high at power-on, so safe as the LCD reset |
 
 ## Wiring
 
@@ -71,7 +72,7 @@ Bottom: Vbus G    DP   DN   3V3  G    Tx   Rx   3V3  G    0    1    2    3
 | CLK | header **48** |
 | CS | header **G** (display is the only device on this bus) |
 | DC | header **3** |
-| RST | header **3V3** (software reset is used) |
+| RST | header **0** (GPIO0). Needed: with CS tied low the panel stays white without a hardware reset |
 | BL | header **3V3** (backlight always on) |
 
 Remove any TF card from the board — its slot shares GPIO47/48.
