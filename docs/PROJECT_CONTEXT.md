@@ -179,7 +179,13 @@ Verification so far:
 2. Bench test: flash over USB-C, check Ethernet, HA discovery, relays, DIs and the LCD.
 3. Servo bring-up: ping, read position and load, move it, then tune the response timeout and baud.
 4. Limit-finding routine: drive slowly to each end until the load rises, store the end-stop
-   positions in flash, and map 0–100 % mixer opening onto that range.
+   positions in flash, and map 0–100 % mixer opening onto that range. Use the goal-speed register
+   (46) to creep during calibration, and keep normal moves a little short of the stops.
+   **Polling design (agreed):** poll the servo every 2 s while idle and about every 100 ms while it
+   moves or calibrates. The fast loop stays on the device. HA gets only filtered values on a slower
+   schedule (e.g. position change > 2 steps, load change > 5 %, plus a periodic heartbeat), so the
+   HA database doesn't fill with repeated readings. The servo is fast (under 2 s for 400 steps);
+   that's fine for control, since the thermal loop is much slower, and speed can be capped later.
 5. Heating logic on the device:
    - zone demand → solenoids
    - pump on when any zone is open (with overrun)
