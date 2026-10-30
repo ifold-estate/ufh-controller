@@ -9,6 +9,10 @@ substitutions:
   # (more margin, and plenty fast for this job). A new servo needs the same change.
   servo_baud: "115200"
   servo_id: "1"
+  # Servo positions for a fully cold and fully hot mixer, for the % on the LCD. Placeholders until
+  # the end-stop calibration routine sets them.
+  mixer_pos_cold: "0"
+  mixer_pos_hot: "1023"
 
 esphome:
   name: ${name}
@@ -17,6 +21,8 @@ esphome:
   project:
     name: ifold-estate.ufh-controller
     version: "0.1.0"
+  includes:
+    - ufh_screen.h   # LCD heat-flow screen (preview it with tools/screen_preview/render.py)
 
 esp32:
   variant: esp32s3
@@ -267,23 +273,20 @@ light:
 # CS tied to GND, BL tied to 3V3 (see README). RST is on GPIO0 (the BOOT pin, high at power-on, so
 # safe to share): with CS tied low the panel can't resync on its own, so it needs a hardware reset
 # after the SPI pins are set up.
+# Sizes must match FONT_FILES in tools/screen_preview/render.py.
 font:
+  - file: "fonts/DejaVuSans-Bold.ttf"
+    id: font_pct
+    size: 26
+  - file: "fonts/DejaVuSans-Bold.ttf"
+    id: font_temp
+    size: 20
+  - file: "fonts/DejaVuSans.ttf"
+    id: font_label
+    size: 13
   - file: "fonts/DejaVuSans.ttf"
     id: font_small
-    size: 18
-  - file: "fonts/DejaVuSans-Bold.ttf"
-    id: font_big
-    size: 28
-
-color:
-  - id: c_on
-    hex: "33cc66"
-  - id: c_off
-    hex: "555555"
-  - id: c_text
-    hex: "ffffff"
-  - id: c_dim
-    hex: "aaaaaa"
+    size: 12
 
 display:
   - platform: mipi_spi
@@ -295,47 +298,33 @@ display:
     data_rate: 10MHz
     spi_mode: MODE0
     rotation: 90
-    update_interval: 2s
+    # Redrawn by the interval below: fast while a pump runs (to animate the flow), slow otherwise.
+    update_interval: never
+    # Relays: 1-6 zones (Playroom, Kitchen x2, Booth x2, Lounge), 7 floor pump, 8 boiler CFH + pump.
     lambda: |-
-      it.fill(Color::BLACK);
-      it.print(8, 6, id(font_big), id(c_text), "UFH Controller");
-
-      // Relays
-      auto relay_box = [&](int idx, bool on) {
-        int x = 8 + (idx % 4) * 78;
-        int y = 50 + (idx / 4) * 40;
-        it.filled_rectangle(x, y, 72, 34, on ? id(c_on) : id(c_off));
-        it.printf(x + 36, y + 17, id(font_small), id(c_text), TextAlign::CENTER, "R%d", idx + 1);
-      };
-      relay_box(0, id(relay1).state); relay_box(1, id(relay2).state);
-      relay_box(2, id(relay3).state); relay_box(3, id(relay4).state);
-      relay_box(4, id(relay5).state); relay_box(5, id(relay6).state);
-      relay_box(6, id(relay7).state); relay_box(7, id(relay8).state);
-
-      // Inputs
-      bool di[8] = {id(di1).state, id(di2).state, id(di3).state, id(di4).state,
-                    id(di5).state, id(di6).state, id(di7).state, id(di8).state};
-      it.print(8, 140, id(font_small), id(c_dim), "Inputs");
-      for (int i = 0; i < 8; i++) {
-        int cx = 90 + i * 28;
-        if (di[i]) it.filled_circle(cx, 150, 9, id(c_on));
-        else it.circle(cx, 150, 9, id(c_off));
+      auto t = [](sensor::Sensor *s) { return s->has_state() ? s->state : NAN; };
+      ufh_screen::State st;
+      st.boiler = t(id(temp_boiler_flow));
+      st.mixed = t(id(temp_mixed_flow));
+      st.ret = t(id(temp_return));
+      if (id(mixer_servo).is_online()) {
+        float pct = 100.0f * (id(mixer_servo).last_position() - ${mixer_pos_cold}) /
+                    float(${mixer_pos_hot} - ${mixer_pos_cold});
+        st.mixer_pct = std::max(0.0f, std::min(100.0f, pct));
       }
+      st.boiler_on = id(relay8).state;
+      st.floor_pump_on = id(relay7).state;
+      switch_::Switch *zones[6] = {id(relay1), id(relay2), id(relay3), id(relay4), id(relay5), id(relay6)};
+      for (int i = 0; i < 6; i++) st.zone[i] = zones[i]->state;
+      st.ms = millis();
+      ufh_screen::draw(it, st, id(font_pct), id(font_temp), id(font_label), id(font_small));
 
-      // Temperatures: boiler flow and return on one line, mixed flow (the controlled one) below
-      auto temp = [&](int x, int y, const char *label, sensor::Sensor *t) {
-        if (t->has_state() && !std::isnan(t->state))
-          it.printf(x, y, id(font_small), id(c_text), "%s %.1f°C", label, t->state);
-        else
-          it.printf(x, y, id(font_small), id(c_dim), "%s --", label);
-      };
-      temp(8, 166, "Boiler", id(temp_boiler_flow));
-      temp(165, 166, "Return", id(temp_return));
-      temp(8, 190, "Mixed", id(temp_mixed_flow));
-
-      // Mixer
-      if (id(mixer_servo).is_online())
-        it.printf(8, 214, id(font_small), id(c_text), "Mixer: %d  load %.0f%%",
-                  id(mixer_servo).last_position(), id(mixer_servo).last_load_percent());
-      else
-        it.print(8, 214, id(font_small), id(c_dim), "Mixer: offline");
+interval:
+  - interval: 200ms
+    then:
+      - lambda: |-
+          static uint8_t ticks = 0;
+          if (id(relay7).state || id(relay8).state || ++ticks >= 10) {
+            ticks = 0;
+            id(lcd).update();
+          }
