@@ -26,7 +26,7 @@ Jon does the wiring, flashing and testing.
 | Pump | 240 Vac, switched by a relay |
 | Boiler call for heat (CFH) | 240 Vac signal, switched by a relay |
 | Mixer | Mechanical mixing valve, turned by a **Waveshare SC15 bus servo** (Feetech SCS series, TTL half-duplex serial, 4.8–8.4 V, 15 kg·cm at 6 V, 0–1023 position over about 200°, feedback for position, speed, load, voltage and temperature). Load feedback will be used to find the valve's mechanical end stops. |
-| Servo interface | **Waveshare Bus Servo Adapter A**. Jumper set to UART mode. Its input supply passes straight to the servo, so feed it 6–7.4 V for the SC15. |
+| Servo interface | **Waveshare Bus Servo Adapter A**. Jumper on A (UART mode); B is USB mode. Its input supply passes straight to the servo (SC15: 4.8–8.4 V; the bench uses 5.2 V). Its UART is 5 V, so it connects through an HW-221 (TXS0108E) level shifter. |
 | Temperature sensors | Several DS18B20s (Jon already has them) |
 | Display | **Waveshare 2.4" LCD Module**: ILI9341, 240×320, 4-wire SPI, no touch, pins VCC GND DIN CLK CS DC RST BL. Its logic level follows VCC, so it must be powered from 3V3. https://www.waveshare.com/wiki/2.4inch_LCD_Module |
 | Parts on hand | Logic-level converter board, rectifier, PSU options |
@@ -39,7 +39,7 @@ Jon does the wiring, flashing and testing.
    Arduino/PlatformIO with MQTT and raw ESP-IDF were rejected as more code for the same result.
 2. **Updates go over Ethernet (OTA)** after a first flash over USB-C. Keep USB-C reachable in the
    enclosure for recovery.
-3. **Servo on a plain UART from the header (GPIO1/2), not USB.** The ESP32-S3 can be a USB host, but
+3. **Servo on a plain UART from the header (Tx/Rx, GPIO43/44), not USB.** The ESP32-S3 can be a USB host, but
    that would take over the only USB port (needed for flashing, logs and recovery), USB-C isn't wired
    to supply VBUS, and ESPHome's USB-serial support is newer and less proven.
 4. **The DI terminals can't be used for serial.** They are opto-isolated (5–36 V), input-only and slow.
@@ -47,15 +47,19 @@ Jon does the wiring, flashing and testing.
    and reaches roughly 37–40 V on a lightly loaded transformer, so it would overstress the input's TVS
    diode. A bridge rectifier doesn't help, since it gives the same peak voltage as DC. **Use PoE**
    (preferred) or a 24 Vdc DIN-rail PSU (e.g. Mean Well HDR-15-24).
-6. **Logs go to USB Serial/JTAG**, so UART0 (header Tx/Rx, GPIO43/44) stays free as a spare console.
-   The servo isn't on UART0 because the boot ROM prints its log on GPIO43.
+6. **Logs go to USB Serial/JTAG**, so UART0 (header Tx/Rx, GPIO43/44) is free for the servo. The
+   boot ROM prints start-up text on GPIO43 at 115200, but it has no 0xFF bytes, so it can't form a
+   valid servo packet. (The servo was first planned for GPIO1/2; it moved because the header's Tx/Rx
+   pins sit next to 3V3 and G, so one 4-pin connector carries everything.)
 7. **The LCD uses the TF-card pins (47/48)**, so the TF card is not used. CS and BL are tied to fixed
    levels, so there's no backlight control. RST must be driven from GPIO0: with CS tied low and
    RST tied high, the panel stayed white, since it can't resync after stray clock edges at power-up.
    GPIO0 (BOOT) is high at power-on, so sharing it with the LCD reset is safe. The display runs at
    10 MHz in SPI mode 0 (set while debugging; keep them unless there's a reason to change).
-8. **Servo baud rate:** SCS servos ship at 1 Mbps. If a BSS138-type level shifter is needed and is
-   marginal at 1 Mbps, change the servo to 115200 baud and set `servo_baud`.
+8. **Servo link: 115200 baud through a TXS0108E level shifter (HW-221).** The adapter's UART is 5 V,
+   so it needs a shifter. At the servo's factory 1 Mbps the TXS0108E garbled the data, so the servo
+   was set to 115200 with `tools/scs_tool.py`. A replacement servo needs the same change. Wiring is
+   straight through, as Waveshare says: ESP Tx → adapter TX, ESP Rx → adapter RX (confirmed).
 
 ## 4. Pin map
 
@@ -84,17 +88,16 @@ Project allocation:
 
 | Pin | Use |
 |---|---|
-| GPIO1 | Servo TX → adapter RX |
-| GPIO2 | Servo RX ← adapter TX |
 | GPIO21 | DS18B20 one-wire bus, 4.7 kΩ pull-up to 3V3 |
 | GPIO48 | LCD CLK (SPI3) |
 | GPIO47 | LCD DIN (SPI3) |
 | GPIO3 | LCD DC (strapping pin, fine as an output) |
 | GPIO0 | LCD RST (BOOT pin; pressing BOOT also resets the LCD) |
 | LCD CS → G, BL → 3V3, VCC → 3V3 | |
-| GPIO43/44 | Spare console, keep free |
+| GPIO43 (Tx) | Servo UART TX → shifter → adapter TX |
+| GPIO44 (Rx) | Servo UART RX ← shifter ← adapter RX |
 | GPIO45 | Avoid (strapping pin for flash voltage) |
-| Spare | None left on the header. I2C (41/42) can take more devices. |
+| Spare | GPIO1 and GPIO2. I2C (41/42) can take more devices. |
 
 ## 5. Code status (v0.1)
 
@@ -134,7 +137,10 @@ Verification so far:
 - Bench test so far (Wi-Fi variant, flashed over USB then OTA): Wi-Fi, the encrypted API and OTA
   work, the TCA9554 (0x20) and RTC (0x51) respond on I2C, and the LCD test page displays.
   Relays 1–8 click from the web page, with their LEDs and the LCD following. The status LED is RGB
-  order, not GRB. HA discovery, DIs, DS18B20s, the servo and Ethernet are not confirmed yet.
+  order, not GRB. The servo answers at 115200 baud
+  (position, load, voltage and temperature read correctly; about 300 polls at 50 ms with no errors).
+  Moving the servo hasn't been tried yet. HA discovery, DIs, DS18B20s and Ethernet are not confirmed
+  yet.
 
 ## 6. Environment notes (for Claude sessions)
 
@@ -154,7 +160,7 @@ Verification so far:
 - [ ] How is HA installed: HA OS/Supervised (ESPHome add-on available) or Container/Core?
 - [ ] How many zones are there, and which relay drives what? Proposed: relays 1–6 zones, 7 pump,
       8 boiler CFH.
-- [ ] What logic level does the Bus Servo Adapter A UART use (3.3 V or 5 V)? Check before wiring.
+- [x] What logic level does the Bus Servo Adapter A UART use? 5 V, so it goes through a level shifter.
 - [ ] NEST → DI interface. The DIs are bi-directional opto inputs rated 5–36 V. A 24 Vac call-for-heat
       line peaks above 36 V, so it needs a design: a small 24 Vac relay per zone, or a resistor/opto
       interface. Also, NEST thermostats need a common wire or power-stealing, which affects how CFH

@@ -5,9 +5,9 @@
 substitutions:
   name: ufh-controller
   friendly_name: UFH Controller
-  # Servo bus. SCS servos ship at 1000000 baud; drop to 115200 if a level shifter is in the path
-  # (the servo's own baud register must be changed to match).
-  servo_baud: "1000000"
+  # Servo bus. SCS servos ship at 1000000 baud, which the TXS0108E level shifter garbles, so the
+  # servo was set to 115200 with tools/scs_tool.py. A new servo needs the same change.
+  servo_baud: "115200"
   servo_id: "1"
 
 esphome:
@@ -34,7 +34,7 @@ external_components:
       path: components
     components: [scs_servo]
 
-# Logs go to USB-C (USB Serial/JTAG) so UART0 (header Tx/Rx, GPIO43/44) stays free as a spare console.
+# Logs go to USB-C (USB Serial/JTAG), so UART0 (header Tx/Rx, GPIO43/44) is free for the servo.
 logger:
   hardware_uart: USB_SERIAL_JTAG
 
@@ -79,8 +79,10 @@ spi:
 
 uart:
   id: servo_uart
-  tx_pin: GPIO1
-  rx_pin: GPIO2
+  # Header Tx/Rx (UART0). The boot ROM prints its start-up text here at 115200, but that can't form
+  # a valid servo packet (no 0xFF bytes), so the servo ignores it.
+  tx_pin: GPIO43
+  rx_pin: GPIO44
   baud_rate: ${servo_baud}
 
 one_wire:

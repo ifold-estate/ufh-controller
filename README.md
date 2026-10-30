@@ -49,13 +49,12 @@ Bottom: Vbus G    DP   DN   3V3  G    Tx   Rx   3V3  G    0    1    2    3
 
 | Header pin | GPIO | Use |
 |---|---|---|
-| 1 | 1 | Servo UART TX → Bus Servo Adapter **RX** |
-| 2 | 2 | Servo UART RX ← Bus Servo Adapter **TX** |
 | 21 | 21 | DS18B20 one-wire bus (4.7 kΩ pull-up to 3V3) |
 | 48 | 48 | LCD **CLK** (SPI3 SCLK) |
 | 47 | 47 | LCD **DIN** (SPI3 MOSI) |
 | 3 | 3 | LCD **DC** |
-| Tx / Rx | 43 / 44 | Kept free — spare serial console |
+| Tx / Rx | 43 / 44 | Servo UART (via level shifter) → Bus Servo Adapter **TX** / **RX** |
+| 1, 2 | 1, 2 | Spare |
 | SCL / SDA | 41 / 42 | Shared I2C bus — available for extra I2C devices |
 | 45 | — | Strapping pin — do not use |
 | 0 | LCD RST | BOOT button / strapping pin; high at power-on, so safe as the LCD reset |
@@ -85,13 +84,20 @@ between data and 3V3. Each probe's 64-bit address is printed in the ESPHome log 
 
 ### Bus Servo Adapter A
 
-- Jumper set to **UART** mode (not USB).
-- ESP GPIO1 → adapter RX, ESP GPIO2 → adapter TX, G → GND.
-- **Check the adapter's UART logic level.** If it is 5 V, put the level converter in the path.
-  BSS138-type converters can be marginal at 1 Mbps — if so, set the servo to 115200 baud and change
-  `servo_baud` in the YAML.
-- Servo supply: SC15 is rated 4.8–8.4 V. Feed the adapter about 6–7.4 V (the adapter passes its
-  input straight to the servo).
+- Jumper on **A** (UART mode). **B** is USB mode, used only with `tools/scs_tool.py`.
+- Straight through, as Waveshare documents ("RX-RX, TX-TX"): header **Tx** (GPIO43) → adapter
+  **TX**, header **Rx** (GPIO44) → adapter **RX**, via a level shifter (the adapter side is 5 V).
+  Common ground between the ESP32, the shifter and the adapter's supply.
+- Level shifter: HW-221 (TXS0108E). A side on the ESP32 at 3V3, B side on the adapter at its 5 V
+  supply, OE to 3V3.
+- **Baud rate 115200.** The TXS0108E garbles 1 Mbps, so the servo's stored baud rate was changed
+  with `tools/scs_tool.py PORT set-baud 115200` (adapter jumper on B, adapter USB to a computer,
+  ESP32 wires unplugged). A new or replacement servo needs the same change. `scs_tool.py PORT scan`
+  finds a servo's current baud rate and ID.
+- Servo supply: SC15 is rated 4.8–8.4 V, and the adapter passes its input straight to the servo.
+  The bench test used 5.2 V; 6–7.4 V gives more torque. Keep the B side of the level shifter
+  within the TXS0108E's 5.5 V limit, e.g. by powering it from a 5 V rail rather than the servo
+  supply if that goes above 5.5 V.
 
 ### Power
 
