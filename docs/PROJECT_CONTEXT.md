@@ -139,7 +139,12 @@ Verification so far:
   Relays 1–8 click from the web page, with their LEDs and the LCD following. The status LED is RGB
   order, not GRB. The servo answers at 115200 baud
   (position, load, voltage and temperature read correctly; about 300 polls at 50 ms with no errors).
-  Moving the servo hasn't been tried yet. HA discovery, DIs, DS18B20s and Ethernet are not confirmed
+  Movement checked over the native API (no load, no end stops): every move from 300 to 700 lands
+  within 2–4 steps of the target, a 400-step move finishes within one 2 s poll, and the load reads
+  about ±6–8 % while holding and 0 % with torque off. Writing a target with torque off still moves
+  the servo, because the servo re-enables torque itself, so the torque switch can show OFF while
+  the servo is holding. The built-in web server stopped answering HTTP once during testing, while
+  the API kept working. HA discovery, DIs, DS18B20s and Ethernet are not confirmed
   yet.
 
 ## 6. Environment notes (for Claude sessions)
