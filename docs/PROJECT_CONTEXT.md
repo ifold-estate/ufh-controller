@@ -186,6 +186,25 @@ Verification so far:
    schedule (e.g. position change > 2 steps, load change > 5 %, plus a periodic heartbeat), so the
    HA database doesn't fill with repeated readings. The servo is fast (under 2 s for 400 steps);
    that's fine for control, since the thermal loop is much slower, and speed can be capped later.
+**Temperature sensors (planned): three DS18B20s at the mixer's ports.** Boiler flow (hot in),
+return (cold in, from the manifold) and mixed flow (out to the manifold). Mixed flow is the PID's
+control input and drives the over-temperature cut-out. Boiler flow and return show how much heat the
+floors take and whether the boiler is working.
+
+**Plant timing (from Jon, 30 Oct 2026):** the boiler has a high thermal mass and is some distance
+away, and its CFH has a hysteresis of 1–2 minutes, so it takes about 5 minutes from a thermostat
+call to hot water at the mixer. The zone actuators take about 2 minutes to open. Design consequences:
+- Boiler fault: judge on boiler flow *rising* after a grace period (e.g. 15 min), not on a fixed
+  temperature soon after the call.
+- PID: hold it while boiler flow is below setpoint + margin, to avoid integral windup, and reset it
+  when it starts. Pre-position the valve from all three temperatures, roughly
+  (setpoint − return) / (boiler flow − return), and let the PID trim, to limit overshoot when hot
+  water arrives.
+- Sequencing: zone valves open → wait for the actuator opening time → pump on → boiler CFH. When
+  demand ends: drop CFH, pump overrun to carry away stored heat.
+- Over-temperature cut-out stays immediate.
+- All timings (actuator opening, pump overrun, boiler grace period) are adjustable from HA.
+
 5. Heating logic on the device:
    - zone demand → solenoids
    - pump on when any zone is open (with overrun)
