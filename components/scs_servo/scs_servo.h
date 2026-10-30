@@ -42,6 +42,11 @@ class SCSServo : public PollingComponent, public uart::UARTDevice {
   void set_load_sensor(sensor::Sensor *s) { this->load_sensor_ = s; }
   void set_voltage_sensor(sensor::Sensor *s) { this->voltage_sensor_ = s; }
   void set_temperature_sensor(sensor::Sensor *s) { this->temperature_sensor_ = s; }
+#ifdef USE_SWITCH
+  // The servo turns its own torque on when it gets a goal position, so the switch is refreshed from
+  // the torque register on every poll rather than trusting the last command.
+  void set_torque_switch(switch_::Switch *s) { this->torque_switch_ = s; }
+#endif
 
   // Public API for automations / lambdas.
   bool ping();
@@ -70,6 +75,9 @@ class SCSServo : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor *load_sensor_{nullptr};
   sensor::Sensor *voltage_sensor_{nullptr};
   sensor::Sensor *temperature_sensor_{nullptr};
+#ifdef USE_SWITCH
+  switch_::Switch *torque_switch_{nullptr};
+#endif
 };
 
 #ifdef USE_NUMBER

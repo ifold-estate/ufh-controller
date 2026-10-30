@@ -26,7 +26,7 @@ Jon does the wiring, flashing and testing.
 | Pump | 240 Vac, switched by a relay |
 | Boiler call for heat (CFH) | 240 Vac signal, switched by a relay |
 | Mixer | Mechanical mixing valve, turned by a **Waveshare SC15 bus servo** (Feetech SCS series, TTL half-duplex serial, 4.8–8.4 V, 15 kg·cm at 6 V, 0–1023 position over about 200°, feedback for position, speed, load, voltage and temperature). Load feedback will be used to find the valve's mechanical end stops. |
-| Servo interface | **Waveshare Bus Servo Adapter A**. Jumper on A (UART mode); B is USB mode. Its input supply passes straight to the servo (SC15: 4.8–8.4 V; the bench uses 5.2 V). Its UART is 5 V, so it connects through an HW-221 (TXS0108E) level shifter. |
+| Servo interface | **Waveshare Bus Servo Adapter A**. Jumper on A (UART mode); B is USB mode. Its input supply passes straight to the servo (SC15: 4.8–8.4 V; the bench uses 5.2 V). Its UART logic is 3.3 V (TXD input 5 V tolerant), so it connects straight to the ESP32. |
 | Temperature sensors | Several DS18B20s (Jon already has them) |
 | Display | **Waveshare 2.4" LCD Module**: ILI9341, 240×320, 4-wire SPI, no touch, pins VCC GND DIN CLK CS DC RST BL. Its logic level follows VCC, so it must be powered from 3V3. https://www.waveshare.com/wiki/2.4inch_LCD_Module |
 | Parts on hand | Logic-level converter board, rectifier, PSU options |
@@ -56,9 +56,10 @@ Jon does the wiring, flashing and testing.
    RST tied high, the panel stayed white, since it can't resync after stray clock edges at power-up.
    GPIO0 (BOOT) is high at power-on, so sharing it with the LCD reset is safe. The display runs at
    10 MHz in SPI mode 0 (set while debugging; keep them unless there's a reason to change).
-8. **Servo link: 115200 baud through a TXS0108E level shifter (HW-221).** The adapter's UART is 5 V,
-   so it needs a shifter. At the servo's factory 1 Mbps the TXS0108E garbled the data, so the servo
-   was set to 115200 with `tools/scs_tool.py`. A replacement servo needs the same change. Wiring is
+8. **Servo link: 115200 baud, wired direct, no level shifter.** The adapter's schematic shows 3.3 V
+   logic (SN74LVC1G125/126 on an AMS1117-3.3; RXD drives 0–3.3 V, TXD is 5 V tolerant). A TXS0108E
+   shifter (HW-221) was tried first and was unreliable: its 5 V side needs ~3.4 V for a high, so the
+   adapter's 3.3 V replies were marginal. The servo was set to 115200 with `tools/scs_tool.py`. A replacement servo needs the same change. Wiring is
    straight through, as Waveshare says: ESP Tx → adapter TX, ESP Rx → adapter RX (confirmed).
 
 ## 4. Pin map
@@ -94,8 +95,8 @@ Project allocation:
 | GPIO3 | LCD DC (strapping pin, fine as an output) |
 | GPIO0 | LCD RST (BOOT pin; pressing BOOT also resets the LCD) |
 | LCD CS → G, BL → 3V3, VCC → 3V3 | |
-| GPIO43 (Tx) | Servo UART TX → shifter → adapter TX |
-| GPIO44 (Rx) | Servo UART RX ← shifter ← adapter RX |
+| GPIO43 (Tx) | Servo UART TX → adapter TX (direct) |
+| GPIO44 (Rx) | Servo UART RX ← adapter RX (direct) |
 | GPIO45 | Avoid (strapping pin for flash voltage) |
 | Spare | GPIO1 and GPIO2. I2C (41/42) can take more devices. |
 
@@ -147,11 +148,11 @@ Verification so far:
   the API kept working.
 - DS18B20s: three probes on GPIO21, named Boiler flow, Return and Mixed flow by address. Identified
   by warming each one and labelled. They read room temperature (19–21 °C). The LCD shows all three.
-- Servo link through the TXS0108E is unreliable: it works for a while, then every reply arrives
-  with flipped bits, even with the servo idle. Cause: the shifter's B side needs about 0.65 × 5.2 V
-  = 3.4 V for a high, but the adapter's RXD only drives 3.3 V. Fix: wire the ESP32 straight to the
-  adapter (Tx → TXD, Rx → RXD, G → GND), which the adapter schematic supports. HA discovery, DIs, DS18B20s and Ethernet are not confirmed
-  yet.
+- Servo link through the TXS0108E was unreliable (bursts of flipped bits, even with the servo idle),
+  because the adapter's 3.3 V high is below the shifter's ~3.4 V threshold. Wired direct, it's
+  clean (15/15 reads, no errors). The torque switch now reads back the servo's torque register, so
+  it shows ON when a goal position re-enables torque.
+- Not confirmed yet: HA discovery, DIs and Ethernet.
 
 ## 6. Environment notes (for Claude sessions)
 
@@ -171,7 +172,7 @@ Verification so far:
 - [ ] How is HA installed: HA OS/Supervised (ESPHome add-on available) or Container/Core?
 - [ ] How many zones are there, and which relay drives what? Proposed: relays 1–6 zones, 7 pump,
       8 boiler CFH.
-- [x] What logic level does the Bus Servo Adapter A UART use? 5 V, so it goes through a level shifter.
+- [x] What logic level does the Bus Servo Adapter A UART use? 3.3 V (TXD 5 V tolerant), so no level shifter.
 - [ ] NEST → DI interface. The DIs are bi-directional opto inputs rated 5–36 V. A 24 Vac call-for-heat
       line peaks above 36 V, so it needs a design: a small 24 Vac relay per zone, or a resistor/opto
       interface. Also, NEST thermostats need a common wire or power-stealing, which affects how CFH

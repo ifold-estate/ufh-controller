@@ -68,6 +68,15 @@ void SCSServo::update() {
     this->voltage_sensor_->publish_state(volt_raw / 10.0f);
   if (this->temperature_sensor_ != nullptr)
     this->temperature_sensor_->publish_state(temp_raw);
+
+#ifdef USE_SWITCH
+  std::vector<uint8_t> torque;
+  if (this->torque_switch_ != nullptr && this->read_registers_(SCS_REG_TORQUE_ENABLE, 1, &torque)) {
+    bool on = torque[0] != 0;
+    if (on != this->torque_switch_->state)
+      this->torque_switch_->publish_state(on);
+  }
+#endif
 }
 
 bool SCSServo::ping() {

@@ -53,7 +53,7 @@ Bottom: Vbus G    DP   DN   3V3  G    Tx   Rx   3V3  G    0    1    2    3
 | 48 | 48 | LCD **CLK** (SPI3 SCLK) |
 | 47 | 47 | LCD **DIN** (SPI3 MOSI) |
 | 3 | 3 | LCD **DC** |
-| Tx / Rx | 43 / 44 | Servo UART (via level shifter) → Bus Servo Adapter **TX** / **RX** |
+| Tx / Rx | 43 / 44 | Servo UART, wired direct → Bus Servo Adapter **TX** / **RX** |
 | 1, 2 | 1, 2 | Spare |
 | SCL / SDA | 41 / 42 | Shared I2C bus — available for extra I2C devices |
 | 45 | — | Strapping pin — do not use |
@@ -86,18 +86,18 @@ between data and 3V3. Each probe's 64-bit address is printed in the ESPHome log 
 
 - Jumper on **A** (UART mode). **B** is USB mode, used only with `tools/scs_tool.py`.
 - Straight through, as Waveshare documents ("RX-RX, TX-TX"): header **Tx** (GPIO43) → adapter
-  **TX**, header **Rx** (GPIO44) → adapter **RX**, via a level shifter (the adapter side is 5 V).
-  Common ground between the ESP32, the shifter and the adapter's supply.
-- Level shifter: HW-221 (TXS0108E). A side on the ESP32 at 3V3, B side on the adapter at its 5 V
-  supply, OE to 3V3.
-- **Baud rate 115200.** The TXS0108E garbles 1 Mbps, so the servo's stored baud rate was changed
+  **TX**, header **Rx** (GPIO44) → adapter **RX**, header **G** → adapter **GND**. **No level
+  shifter:** the adapter's logic runs at 3.3 V (its own AMS1117), RXD drives 0–3.3 V, and TXD is
+  5 V tolerant. A TXS0108E shifter was tried and made the link unreliable (its 5 V side needs
+  ~3.4 V for a high).
+- **Baud rate 115200.** The servo's stored baud rate was changed from the factory 1 Mbps
   with `tools/scs_tool.py PORT set-baud 115200` (adapter jumper on B, adapter USB to a computer,
   ESP32 wires unplugged). A new or replacement servo needs the same change. `scs_tool.py PORT scan`
   finds a servo's current baud rate and ID.
 - Servo supply: SC15 is rated 4.8–8.4 V, and the adapter passes its input straight to the servo.
-  The bench test used 5.2 V; 6–7.4 V gives more torque. Keep the B side of the level shifter
-  within the TXS0108E's 5.5 V limit, e.g. by powering it from a 5 V rail rather than the servo
-  supply if that goes above 5.5 V.
+  The bench test used 5.2 V; 6–7.4 V gives more torque and keeps the adapter's 3.3 V regulator
+  (which needs ~4.4 V in) clear of motor-current sags. Power the adapter from its own supply, not
+  the board's 5V header pin; only ground is shared.
 
 ### Power
 

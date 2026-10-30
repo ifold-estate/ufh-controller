@@ -5,8 +5,8 @@
 substitutions:
   name: ufh-controller
   friendly_name: UFH Controller
-  # Servo bus. SCS servos ship at 1000000 baud, which the TXS0108E level shifter garbles, so the
-  # servo was set to 115200 with tools/scs_tool.py. A new servo needs the same change.
+  # Servo bus. SCS servos ship at 1000000 baud; this servo was set to 115200 with tools/scs_tool.py
+  # (more margin, and plenty fast for this job). A new servo needs the same change.
   servo_baud: "115200"
   servo_id: "1"
 

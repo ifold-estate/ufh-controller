@@ -20,3 +20,4 @@ async def to_code(config):
     await cg.register_component(var, config)
     parent = await cg.get_variable(config[CONF_SCS_SERVO_ID])
     cg.add(var.set_parent(parent))
+    cg.add(parent.set_torque_switch(var))
