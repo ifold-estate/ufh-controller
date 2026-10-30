@@ -117,7 +117,15 @@ Repository: `ifold-estate/ufh-controller`
   - I2C, the TCA9554 relays (all `ALWAYS_OFF` at boot), DI1–8 with a 50 ms filter
   - The PCF85063 RTC (set from HA time), status, uptime, buzzer (RTTTL) and RGB LED
   - One DS18B20 placeholder (add addresses from the boot log)
-  - The servo entities, and an LCD test page (relays, inputs, probe, mixer)
+  - The servo entities, and the LCD heat-flow screen (`ufh_screen.h`, from Jon's sketch, agreed
+    30 Oct 2026): boiler loop, mixer and floor loop with pipes coloured by probe temperature
+    (10 °C blue → sky blue → amber → 35 °C orange → 60 °C red, avoiding a purple midpoint); flame
+    and pumps follow relays 8 and 7; zone dots follow relays 1–6; room names follow the thermostat
+    DIs 1–4 (blue = calling for heat); bubbles move clockwise round a loop while its pump runs (redraw
+    every 200 ms, otherwise every 2 s); mode pill and status word at the bottom. Preview it on a PC
+    with `tools/screen_preview/render.py OUT_DIR`. Mode is fixed at MANUAL and status is derived
+    from the relays until the heating logic sets them. Not yet seen on the real LCD; if the
+    animation is jerky, try the SPI at 40 MHz (a full redraw takes ~120 ms at 10 MHz).
 - `ufh-controller-wifi.yaml` is the production build. It includes the main config, swaps Ethernet
   for Wi-Fi (ESPHome can't run both at once), adds a "Wi-Fi signal" diagnostic sensor, and has no
   Wi-Fi password built in. The password is set
@@ -235,4 +243,4 @@ call to hot water at the mixer. The zone actuators take about 2 minutes to open.
    - flow over-temperature cut-out (close the mixer, drop CFH)
    - safe behaviour on sensor loss or servo offline
    - watchdog defaults while HA is unreachable
-7. LCD status pages.
+7. LCD: have the heating logic drive the mode (AUTO / OVERRIDE / MANUAL) and status (Warming, Holding, Waiting…).

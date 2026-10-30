@@ -9,7 +9,7 @@ ESPHome firmware for an underfloor-heating manifold controller, integrated with 
 - **Loads:** 24 Vac zone solenoids, 240 Vac pump, 240 Vac boiler call-for-heat (all via the onboard relays)
 - **Inputs:** NEST thermostats (24 Vac) via the opto-isolated digital inputs — *interface circuit to be designed*
 
-> Status: v0.1 — hardware layer only (relays, inputs, sensors, servo driver, display test page).
+> Status: v0.1 — hardware layer only (relays, inputs, sensors, servo driver, heat-flow LCD screen).
 > Heating logic is not implemented yet. All relays start OFF.
 
 ## Repository layout
@@ -19,6 +19,7 @@ ESPHome firmware for an underfloor-heating manifold controller, integrated with 
 | `ufh-controller.yaml` | Main ESPHome configuration |
 | `ufh-controller-wifi.yaml` | Wi-Fi build of the main configuration (the one installed) |
 | `components/scs_servo/` | Custom ESPHome component for Feetech SCS bus servos |
+| `ufh_screen.h` | LCD heat-flow screen (preview with `tools/screen_preview/render.py`) |
 | `fonts/` | DejaVu Sans fonts for the LCD (bundled, see `LICENSE-DejaVu.txt`) |
 | `secrets.example.yaml` | Template for `secrets.yaml` (not committed) |
 | `docs/PROJECT_CONTEXT.md` | Background, decisions, open questions — read this first |
