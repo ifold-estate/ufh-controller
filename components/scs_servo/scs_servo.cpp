@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "esphome/core/hal.h"
+#include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -22,6 +23,8 @@ void SCSServo::dump_config() {
   ESP_LOGCONFIG(TAG, "  ID: %u", this->servo_id_);
   ESP_LOGCONFIG(TAG, "  Response timeout: %u ms", (unsigned) this->response_timeout_ms_);
   ESP_LOGCONFIG(TAG, "  Online: %s", YESNO(this->online_));
+  if (!this->last_failure_.empty())
+    ESP_LOGCONFIG(TAG, "  Last failed reply: %s", this->last_failure_.c_str());
   LOG_UPDATE_INTERVAL(this);
   LOG_SENSOR("  ", "Position", this->position_sensor_);
   LOG_SENSOR("  ", "Speed", this->speed_sensor_);
@@ -127,6 +130,7 @@ bool SCSServo::transact_(uint8_t instruction, const std::vector<uint8_t> &params
   rx.reserve(tx.size() + reply_len);
   const uint32_t start = millis();
   bool echo_checked = false;
+  bool echo_seen = false;
   while (millis() - start < this->response_timeout_ms_) {
     while (this->available()) {
       uint8_t b;
@@ -136,8 +140,10 @@ bool SCSServo::transact_(uint8_t instruction, const std::vector<uint8_t> &params
     // Strip an exact echo of our transmission, if present.
     if (!echo_checked && rx.size() >= tx.size()) {
       echo_checked = true;
-      if (std::equal(tx.begin(), tx.end(), rx.begin()))
+      if (std::equal(tx.begin(), tx.end(), rx.begin())) {
         rx.erase(rx.begin(), rx.begin() + tx.size());
+        echo_seen = true;
+      }
     }
     if (echo_checked && rx.size() >= reply_len)
       break;
@@ -160,10 +166,19 @@ bool SCSServo::transact_(uint8_t instruction, const std::vector<uint8_t> &params
     uint8_t err = rx[i + 4];
     if (err != 0)
       ESP_LOGW(TAG, "Servo reports error flags 0x%02X", err);
+    this->last_failure_.clear();
     reply->assign(rx.begin() + i + 5, rx.begin() + i + 5 + reply_params);
     return true;
   }
-  ESP_LOGV(TAG, "No valid reply (%u bytes received)", (unsigned) rx.size());
+  // Say what did arrive, which tells wiring faults apart: nothing at all (RX path or adapter), only
+  // our own echo (TX path works, servo silent), or garbage (baud rate or level shifter). Only logged
+  // when it changes, since this repeats every poll while the servo is offline.
+  std::string summary = echo_seen ? "echo of our packet, then " : "";
+  summary += rx.empty() ? "nothing" : format_hex_pretty(rx);
+  if (summary != this->last_failure_) {
+    ESP_LOGD(TAG, "No valid reply from ID %u: received %s", this->servo_id_, summary.c_str());
+    this->last_failure_ = summary;
+  }
   return false;
 }
 

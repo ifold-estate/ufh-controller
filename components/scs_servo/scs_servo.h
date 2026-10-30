@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "esphome/core/component.h"
@@ -60,6 +61,7 @@ class SCSServo : public PollingComponent, public uart::UARTDevice {
   uint32_t response_timeout_ms_{20};
   bool online_{false};
   uint32_t error_count_{0};
+  std::string last_failure_;  // last logged failed-reply summary, to avoid repeating it
   int last_position_{-1};
   float last_load_{0};
 
