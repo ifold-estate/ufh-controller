@@ -67,9 +67,10 @@ struct Canvas {
   }
 };
 
-// Usage: preview OUT_PREFIX boiler mixed return mixer_pct boiler_on floor_pump_on zones(6 chars of 0/1) ms
+// Usage: preview OUT_PREFIX boiler mixed return mixer_pct boiler_on floor_pump_on zones(6 chars of 0/1)
+//                rooms_calling(4 chars of 0/1) mode status ms
 int main(int argc, char **argv) {
-  if (argc != 10) return 1;
+  if (argc != 13) return 1;
   static Canvas cv;
   std::string prefix = argv[1];
   cv.text = fopen((prefix + ".txt").c_str(), "w");
@@ -82,7 +83,10 @@ int main(int argc, char **argv) {
   s.boiler_on = argv[6][0] == '1';
   s.floor_pump_on = argv[7][0] == '1';
   for (int i = 0; i < 6; i++) s.zone[i] = argv[8][i] == '1';
-  s.ms = atoi(argv[9]);
+  for (int i = 0; i < 4; i++) s.room_calling[i] = argv[9][i] == '1';
+  s.mode = argv[10];
+  s.status = argv[11];
+  s.ms = atoi(argv[12]);
   Font pct{"pct"}, temp{"temp"}, label{"label"}, small{"small"};
   draw(cv, s, &pct, &temp, &label, &small);
   fclose(cv.text);

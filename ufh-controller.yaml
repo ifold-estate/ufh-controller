@@ -277,7 +277,7 @@ light:
 font:
   - file: "fonts/DejaVuSans-Bold.ttf"
     id: font_pct
-    size: 26
+    size: 22
   - file: "fonts/DejaVuSans-Bold.ttf"
     id: font_temp
     size: 20
@@ -301,6 +301,7 @@ display:
     # Redrawn by the interval below: fast while a pump runs (to animate the flow), slow otherwise.
     update_interval: never
     # Relays: 1-6 zones (Playroom, Kitchen x2, Booth x2, Lounge), 7 floor pump, 8 boiler CFH + pump.
+    # DI1-4: room thermostats.
     lambda: |-
       auto t = [](sensor::Sensor *s) { return s->has_state() ? s->state : NAN; };
       ufh_screen::State st;
@@ -316,6 +317,15 @@ display:
       st.floor_pump_on = id(relay7).state;
       switch_::Switch *zones[6] = {id(relay1), id(relay2), id(relay3), id(relay4), id(relay5), id(relay6)};
       for (int i = 0; i < 6; i++) st.zone[i] = zones[i]->state;
+      // DI1-4: thermostats in Playroom, Kitchen, Booth, Lounge (on = calling for heat)
+      binary_sensor::BinarySensor *stats[4] = {id(di1), id(di2), id(di3), id(di4)};
+      for (int i = 0; i < 4; i++) st.room_calling[i] = stats[i]->state;
+      // No heating logic yet, so the relays are driven by hand. The heating logic will set these.
+      st.mode = "MANUAL";
+      if (!id(mixer_servo).is_online()) st.status = "Mixer offline";
+      else if (st.boiler_on) st.status = "Heating";
+      else if (st.floor_pump_on) st.status = "Circulating";
+      else st.status = "Idle";
       st.ms = millis();
       ufh_screen::draw(it, st, id(font_pct), id(font_temp), id(font_label), id(font_small));
 

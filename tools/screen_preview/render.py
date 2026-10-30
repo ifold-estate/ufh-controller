@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 FONTS = os.path.join(HERE, "..", "..", "fonts")
 FONT_FILES = {  # id -> (file, size), as in ufh-controller.yaml
-    "pct": ("DejaVuSans-Bold.ttf", 26),
+    "pct": ("DejaVuSans-Bold.ttf", 22),
     "temp": ("DejaVuSans-Bold.ttf", 20),
     "label": ("DejaVuSans.ttf", 13),
     "small": ("DejaVuSans.ttf", 12),
@@ -21,11 +21,11 @@ FONT_FILES = {  # id -> (file, size), as in ufh-controller.yaml
 ANCHORS = ["la", "ma", "mm", "lm", "rm"]  # TextAlign order in preview.cpp
 SCALE = 2
 
-STATES = {  # name: boiler mixed return mixer% boiler_on floor_pump_on zones
-    "heating": ("58", "37", "24", "67", "1", "1", "110101"),
-    "idle": ("21", "20", "19", "0", "0", "0", "000000"),
-    "warming": ("33", "29", "21", "100", "1", "1", "011000"),
-    "faults": ("-", "36", "-", "-", "0", "1", "100001"),
+STATES = {  # name: boiler mixed return mixer% boiler_on floor_pump_on zones rooms_calling mode status
+    "heating": ("58", "37", "24", "67", "1", "1", "110101", "1101", "AUTO", "Holding"),
+    "idle": ("21", "20", "19", "0", "0", "0", "000000", "0000", "AUTO", "Idle"),
+    "warming": ("33", "29", "21", "100", "1", "1", "011000", "0100", "AUTO", "Warming"),
+    "faults": ("-", "36", "-", "-", "0", "1", "100001", "1001", "MANUAL", "Mixer offline"),
 }
 
 

@@ -27,12 +27,15 @@ struct State {
   float mixer_pct = NAN;                        // NAN when the servo is offline
   bool boiler_on = false;                       // CFH + boiler pump (one relay)
   bool floor_pump_on = false;
-  bool zone[6] = {};  // Playroom, Kitchen x2, Booth x2, Lounge
-  uint32_t ms = 0;    // millis(), drives the animation
+  bool zone[6] = {};           // manifold valves: Playroom, Kitchen x2, Booth x2, Lounge
+  bool room_calling[4] = {};   // thermostat calling for heat (room cold): Playroom, Kitchen, Booth, Lounge
+  const char *mode = "";       // e.g. AUTO, OVERRIDE, MANUAL
+  const char *status = "";     // e.g. Warming, Holding, Waiting
+  uint32_t ms = 0;             // millis(), drives the animation
 };
 
-// Temperature colour scale: blue at 10 °C, orange at the 35 °C set point, red at 60 °C.
-constexpr float T_COLD = 10, T_SET = 35, T_HOT = 60;
+// Temperature colour scale: blue at 10 °C, orange at the 35 °C set point, red at 60 °C. Below the set
+// point it runs through sky blue and amber rather than straight to blue, which goes purple midway.
 inline Color mix(Color a, Color b, float f) {
   if (f < 0) f = 0;
   if (f > 1) f = 1;
@@ -43,20 +46,29 @@ inline Color c_orange() { return Color(0xF0, 0x9A, 0x38); }
 inline Color c_red() { return Color(0xE8, 0x38, 0x2A); }
 inline Color c_grey() { return Color(0x55, 0x55, 0x55); }
 inline Color c_green() { return Color(0x4C, 0xAF, 0x50); }
+inline Color c_sky() { return Color(0x30, 0xB0, 0xF0); }
 inline Color temp_colour(float t) {
   if (std::isnan(t)) return c_grey();
-  if (t >= T_SET) return mix(c_orange(), c_red(), (t - T_SET) / (T_HOT - T_SET));
-  return mix(c_orange(), c_blue(), (T_SET - t) / (T_SET - T_COLD));
+  struct Stop {
+    float t;
+    Color c;
+  };
+  const Stop stops[] = {{10, c_blue()}, {20, c_sky()}, {28, Color(0xF5, 0xD0, 0x6E)}, {35, c_orange()}, {60, c_red()}};
+  if (t <= stops[0].t) return stops[0].c;
+  for (int i = 1; i < 5; i++)
+    if (t <= stops[i].t) return mix(stops[i - 1].c, stops[i].c, (t - stops[i - 1].t) / (stops[i].t - stops[i - 1].t));
+  return stops[4].c;
 }
 
 // Layout. Pipe centre lines: left and right verticals, top and bottom runs.
 constexpr int W = 8;                     // pipe width
 constexpr int L = 14, R = 238, T = 40, B = 168;
-constexpr int MX0 = 100, MX1 = 172;      // mixer box, left/right
-constexpr int MY0 = 10, MY1 = 82;        // mixer box, top/bottom
+constexpr int MX0 = 96, MX1 = 176;       // mixer box, left/right
+constexpr int MY0 = 4, MY1 = 100;        // mixer box, top/bottom
+constexpr int TEMP_Y = 76;               // all three temperatures sit on this line
 constexpr int MXC = (MX0 + MX1) / 2;     // mixer stem (return into the mixer)
 constexpr int FLAME_Y = 105;             // flame sits in a gap in the left vertical
-constexpr int ZONE_Y0 = 80, ZONE_DY = 16;
+constexpr int ZONE_Y0 = 92, ZONE_DY = 16;
 
 struct Pt {
   int x, y;
@@ -146,27 +158,29 @@ void draw(D &it, const State &s, F *f_pct, F *f_temp, F *f_label, F *f_small) {
   rounded_box(it, MX0, MY0, MX1, MY1, 12, Color(0xC8, 0xD0, 0xD8));
   rounded_box(it, MX0 + 4, MY0 + 4, MX1 - 4, MY1 - 4, 9, Color(0, 0, 0));
   if (std::isnan(s.mixer_pct))
-    it.print(MXC, (MY0 + MY1) / 2, f_label, c_grey(), TextAlign::CENTER, "offline");
+    it.print(MXC, 34, f_label, c_grey(), TextAlign::CENTER, "offline");
   else
-    it.printf(MXC, (MY0 + MY1) / 2, f_pct, Color(255, 255, 255), TextAlign::CENTER, "%.0f%%", s.mixer_pct);
+    it.printf(MXC, 34, f_pct, Color(255, 255, 255), TextAlign::CENTER, "%.0f%%", s.mixer_pct);
 
-  // Temperatures, each in its pipe's colour
-  auto temp = [&](int x, int y, float t, Color c) {
+  // Temperatures in line, each in its pipe's colour: boiler flow, return (in the mixer, above its
+  // inlet), mixed flow.
+  auto temp = [&](int x, float t, Color c) {
     if (std::isnan(t))
-      it.print(x, y, f_temp, c_grey(), TextAlign::TOP_CENTER, "--");
+      it.print(x, TEMP_Y, f_temp, c_grey(), TextAlign::CENTER, "--");
     else
-      it.printf(x, y, f_temp, c, TextAlign::TOP_CENTER, "%.0f°C", t);
+      it.printf(x, TEMP_Y, f_temp, c, TextAlign::CENTER, "%.0f°C", t);
   };
-  temp((L + MX0) / 2 + 2, T + 9, s.boiler, hot);
-  temp((MX1 + R) / 2, T + 9, s.mixed, mixed);
-  temp((MX1 + R) / 2, B + 8, s.ret, ret);
+  temp((L + MX0) / 2 + 2, s.boiler, hot);
+  temp(MXC, s.ret, ret);
+  temp((MX1 + R) / 2 - 3, s.mixed, mixed);
 
   // Boiler (flame) and the two pumps
   flame(it, L, FLAME_Y, s.boiler_on);
-  pump_arrow(it, (L + MX0) / 2 + 2, 118, 19, s.boiler_on ? c_green() : c_grey());
-  pump_arrow(it, (MX1 + R) / 2, 114, 17, s.floor_pump_on ? c_green() : c_grey());
+  pump_arrow(it, (L + MX0) / 2 + 2, 130, 18, s.boiler_on ? c_green() : c_grey());
+  pump_arrow(it, (MX1 + R) / 2, 130, 18, s.floor_pump_on ? c_green() : c_grey());
 
-  // Manifold zones: blue closed (cold), orange open (hot)
+  // Manifold zones: blue closed (cold), orange open (hot). Room names show the thermostats: blue
+  // while one calls for heat (room cold), orange when satisfied (room warm).
   static const char *const NAMES[4] = {"Playroom", "Kitchen", "Booth", "Lounge"};
   static const int8_t ZONES[4][2] = {{0, -1}, {1, 2}, {3, 4}, {5, -1}};
   for (int row = 0; row < 4; row++) {
@@ -176,18 +190,17 @@ void draw(D &it, const State &s, F *f_pct, F *f_temp, F *f_label, F *f_small) {
       int x = pair ? R - 7 + 14 * k : R;
       it.filled_circle(x, y, 6, s.zone[ZONES[row][k]] ? c_orange() : c_blue());
     }
-    it.print(R + 17, y, f_label, Color(0xE0, 0xE0, 0xE0), TextAlign::CENTER_LEFT, NAMES[row]);
+    it.print(R + 17, y, f_label, s.room_calling[row] ? c_sky() : c_orange(), TextAlign::CENTER_LEFT, NAMES[row]);
   }
 
-  // Colour scale
-  constexpr int SX0 = 40, SX1 = 280, SY = 212, SH = 14;
-  for (int x = SX0; x < SX1; x++) {
-    float t = T_HOT - (T_HOT - T_COLD) * (x - SX0) / float(SX1 - SX0);
-    it.filled_rectangle(x, SY, 1, SH, temp_colour(t));
+  // Status line: mode in a pill, then what the controller is doing
+  constexpr int SY = 206;
+  if (*s.mode) {
+    rounded_box(it, 6, SY - 14, 96, SY + 14, 8, Color(0xC8, 0xD0, 0xD8));
+    rounded_box(it, 8, SY - 12, 94, SY + 12, 6, Color(0, 0, 0));
+    it.print(51, SY, f_label, Color(255, 255, 255), TextAlign::CENTER, s.mode);
   }
-  it.print(SX0 - 3, SY + SH / 2, f_small, c_red(), TextAlign::CENTER_RIGHT, "60°C");
-  it.print(SX1 + 3, SY + SH / 2, f_small, c_blue(), TextAlign::CENTER_LEFT, "10°C");
-  it.print((SX0 + SX1) / 2, SY + SH / 2, f_small, Color(255, 255, 255), TextAlign::CENTER, "35°C");
+  it.print(110, SY, f_temp, Color(0xE0, 0xE0, 0xE0), TextAlign::CENTER_LEFT, s.status);
 }
 
 }  // namespace ufh_screen
