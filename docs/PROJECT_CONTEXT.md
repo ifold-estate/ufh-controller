@@ -152,7 +152,11 @@ Verification so far:
   because the adapter's 3.3 V high is below the shifter's ~3.4 V threshold. Wired direct, it's
   clean (15/15 reads, no errors). The torque switch now reads back the servo's torque register, so
   it shows ON when a goal position re-enables torque.
-- Not confirmed yet: HA discovery, DIs and Ethernet.
+- HA (2026.10.2 at 192.168.1.194) discovered and adopted the controller; new entities appear in HA
+  after each firmware update without re-adding it. Removed entities (e.g. the old "Temperature
+  probe 1") linger in HA as unavailable and have to be deleted there.
+- Not confirmed yet: DIs and Ethernet. Switch to the Ethernet build only once the PoE cable is in,
+  otherwise the board drops off Wi-Fi with no network (recover over USB-C).
 
 ## 6. Environment notes (for Claude sessions)
 
@@ -169,7 +173,7 @@ Verification so far:
 
 **Questions for Jon:**
 
-- [ ] How is HA installed: HA OS/Supervised (ESPHome add-on available) or Container/Core?
+- [ ] How is HA installed: HA OS/Supervised (ESPHome add-on available) or Container/Core? (HA 2026.10.2 runs at 192.168.1.194:8123; install type still unknown.)
 - [ ] How many zones are there, and which relay drives what? Proposed: relays 1–6 zones, 7 pump,
       8 boiler CFH.
 - [x] What logic level does the Bus Servo Adapter A UART use? 3.3 V (TXD 5 V tolerant), so no level shifter.
