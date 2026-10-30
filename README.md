@@ -17,6 +17,7 @@ ESPHome firmware for an underfloor-heating manifold controller, integrated with 
 | Path | Purpose |
 |---|---|
 | `ufh-controller.yaml` | Main ESPHome configuration |
+| `ufh-controller-wifi.yaml` | Wi-Fi build of the main configuration (the one installed) |
 | `components/scs_servo/` | Custom ESPHome component for Feetech SCS bus servos |
 | `fonts/` | DejaVu Sans fonts for the LCD (bundled, see `LICENSE-DejaVu.txt`) |
 | `secrets.example.yaml` | Template for `secrets.yaml` (not committed) |
@@ -102,6 +103,8 @@ between data and 3V3. Each probe's 64-bit address is printed in the ESPHome log 
 ### Power
 
 7–36 V **DC** terminal or PoE (IEEE 802.3af). Do not connect 24 Vac to the DC terminal.
+The installation has no network cable, so it uses a 24 Vdc DIN-rail PSU and the Wi-Fi build
+(`ufh-controller-wifi.yaml`).
 
 ## Building and flashing
 
@@ -109,7 +112,7 @@ between data and 3V3. Each probe's 64-bit address is printed in the ESPHome log 
 
 1. Copy `secrets.example.yaml` to `secrets.yaml` and fill in the values.
 2. In Home Assistant → ESPHome Device Builder, add this project (or build locally with
-   `esphome run ufh-controller.yaml`).
+   `esphome run ufh-controller-wifi.yaml`).
 3. Connect the board's USB-C to a computer with a **data** cable and choose *Install → Plug into
    this computer*. If the port is not detected, hold **BOOT** while plugging in.
 

@@ -3,7 +3,7 @@
 This file carries the decisions and background from the first working session, so a new session
 (human or Claude) can pick up the project. Keep it updated as decisions change.
 
-_Last updated: 29 Oct 2026, after the first bench test (LCD working over Wi-Fi)._
+_Last updated: 30 Oct 2026. Ethernet/PoE dropped: the installed controller runs on Wi-Fi with local power._
 
 ---
 
@@ -37,16 +37,21 @@ Jon does the wiring, flashing and testing.
    automatic discovery and the API, has on-device automations, thermostat and PID control, supports
    the W5500, TCA9554, PCF85063 and DS18B20, and its YAML and C++ are text Claude can maintain.
    Arduino/PlatformIO with MQTT and raw ESP-IDF were rejected as more code for the same result.
-2. **Updates go over Ethernet (OTA)** after a first flash over USB-C. Keep USB-C reachable in the
-   enclosure for recovery.
+2. **Network is Wi-Fi; updates go over Wi-Fi (OTA)** after a first flash over USB-C. A network
+   cable can't be pulled to the cabinet (30 Oct 2026), so the installed controller runs
+   `ufh-controller-wifi.yaml` and Ethernet/PoE are unused. Fit the antenna outside or at the edge
+   of a metal enclosure and check the "Wi-Fi signal" entity (aim for better than about −70 dBm).
+   Heating control must not depend on Wi-Fi or HA being up. Keep USB-C reachable in the enclosure
+   for recovery.
 3. **Servo on a plain UART from the header (Tx/Rx, GPIO43/44), not USB.** The ESP32-S3 can be a USB host, but
    that would take over the only USB port (needed for flashing, logs and recovery), USB-C isn't wired
    to supply VBUS, and ESPHome's USB-serial support is newer and less proven.
 4. **The DI terminals can't be used for serial.** They are opto-isolated (5–36 V), input-only and slow.
 5. **Don't power the board from 24 Vac.** The input is rated 7–36 V **DC**. 24 Vac peaks around 34 V
    and reaches roughly 37–40 V on a lightly loaded transformer, so it would overstress the input's TVS
-   diode. A bridge rectifier doesn't help, since it gives the same peak voltage as DC. **Use PoE**
-   (preferred) or a 24 Vdc DIN-rail PSU (e.g. Mean Well HDR-15-24).
+   diode. A bridge rectifier doesn't help, since it gives the same peak voltage as DC. With PoE ruled
+   out, **use a 24 Vdc (or 12 Vdc) DIN-rail PSU** from the cabinet's mains (e.g. Mean Well
+   HDR-15-24).
 6. **Logs go to USB Serial/JTAG**, so UART0 (header Tx/Rx, GPIO43/44) is free for the servo. The
    boot ROM prints start-up text on GPIO43 at 115200, but it has no 0xFF bytes, so it can't form a
    valid servo packet. (The servo was first planned for GPIO1/2; it moved because the header's Tx/Rx
@@ -105,13 +110,14 @@ Project allocation:
 Repository: `ifold-estate/ufh-controller`
 
 - `ufh-controller.yaml` sets up:
-  - Ethernet, the API (encrypted), OTA (encrypted with the API key), and the web server with auth
+  - Ethernet (unused in the installation), the API (encrypted), OTA (encrypted with the API key), and the web server with auth
   - I2C, the TCA9554 relays (all `ALWAYS_OFF` at boot), DI1–8 with a 50 ms filter
   - The PCF85063 RTC (set from HA time), status, uptime, buzzer (RTTTL) and RGB LED
   - One DS18B20 placeholder (add addresses from the boot log)
   - The servo entities, and an LCD test page (relays, inputs, probe, mixer)
-- `ufh-controller-wifi.yaml` is a bench-test variant. It includes the main config, swaps Ethernet
-  for Wi-Fi (ESPHome can't run both at once), and has no Wi-Fi password built in. The password is set
+- `ufh-controller-wifi.yaml` is the production build. It includes the main config, swaps Ethernet
+  for Wi-Fi (ESPHome can't run both at once), adds a "Wi-Fi signal" diagnostic sensor, and has no
+  Wi-Fi password built in. The password is set
   after flashing, over USB (Improv on web.esphome.io) or through the "UFH Controller Setup" hotspot.
   Wi-Fi needs an antenna on the board's SMA socket, since the WROOM-1U has no PCB antenna. CI builds
   both variants.
@@ -155,8 +161,9 @@ Verification so far:
 - HA (2026.10.2 at 192.168.1.194) discovered and adopted the controller; new entities appear in HA
   after each firmware update without re-adding it. Removed entities (e.g. the old "Temperature
   probe 1") linger in HA as unavailable and have to be deleted there.
-- Not confirmed yet: DIs and Ethernet. Switch to the Ethernet build only once the PoE cable is in,
-  otherwise the board drops off Wi-Fi with no network (recover over USB-C).
+- Not confirmed yet: DIs. Ethernet is untested and no longer planned. Don't flash
+  `ufh-controller.yaml` (the Ethernet build) to the installed board: it would drop off Wi-Fi with
+  no network, and recovery needs USB-C.
 
 ## 6. Environment notes (for Claude sessions)
 
@@ -187,7 +194,7 @@ Verification so far:
 **Next work:**
 
 1. ~~Push v0.1, let CI compile it, and fix any build errors.~~ Done.
-2. Bench test: flash over USB-C, check Ethernet, HA discovery, relays, DIs and the LCD.
+2. Bench test: flash over USB-C, check Wi-Fi, HA discovery, relays, DIs and the LCD. (Ethernet dropped.)
 3. Servo bring-up: ping, read position and load, move it, then tune the response timeout and baud.
 4. Limit-finding routine: drive slowly to each end until the load rises, store the end-stop
    positions in flash, and map 0–100 % mixer opening onto that range. Use the goal-speed register

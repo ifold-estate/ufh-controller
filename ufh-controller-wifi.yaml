@@ -1,6 +1,7 @@
-# Wi-Fi variant of ufh-controller.yaml, for bench testing without an Ethernet cable.
-# Same device name, entities and keys; only the network differs. ESPHome can't run
-# Ethernet and Wi-Fi together, so flash ufh-controller.yaml once Ethernet is available.
+# Wi-Fi variant of ufh-controller.yaml. This is the build the installed controller runs:
+# no network cable reaches the cabinet, so it is on Wi-Fi and powered locally (not PoE).
+# Same device name, entities and keys as the Ethernet build; only the network differs.
+# ESPHome can't run Ethernet and Wi-Fi together.
 #
 # The board's ESP32-S3-WROOM-1U has no PCB antenna: fit an antenna to the SMA socket.
 #
@@ -22,3 +23,9 @@ wifi:
 captive_portal:
 
 improv_serial:
+
+sensor:
+  - platform: wifi_signal
+    name: "Wi-Fi signal"
+    update_interval: 60s
+    entity_category: diagnostic
