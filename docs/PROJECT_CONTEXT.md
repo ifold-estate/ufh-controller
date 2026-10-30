@@ -41,7 +41,10 @@ Jon does the wiring, flashing and testing.
    cable can't be pulled to the cabinet (30 Oct 2026), so the installed controller runs
    `ufh-controller-wifi.yaml` and Ethernet/PoE are unused. Fit the antenna outside or at the edge
    of a metal enclosure and check the "Wi-Fi signal" entity (aim for better than about −70 dBm).
-   Heating control must not depend on Wi-Fi or HA being up. Keep USB-C reachable in the enclosure
+   Heating control must not depend on Wi-Fi or HA being up, so the API's reboot-on-HA-loss is off
+   (`reboot_timeout: 0s`); Wi-Fi keeps its default 15 min reboot to recover a stuck connection.
+   The fallback "UFH Controller Setup" hotspot is WPA2-protected with `ap_password` (secrets.yaml
+   locally, the `AP_PASSWORD` Actions secret in CI). Keep USB-C reachable in the enclosure
    for recovery.
 3. **Servo on a plain UART from the header (Tx/Rx, GPIO43/44), not USB.** The ESP32-S3 can be a USB host, but
    that would take over the only USB port (needed for flashing, logs and recovery), USB-C isn't wired

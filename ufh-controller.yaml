@@ -39,6 +39,8 @@ logger:
   hardware_uart: USB_SERIAL_JTAG
 
 api:
+  # Don't reboot when HA is away: heating runs on the board, and a reboot drops every relay.
+  reboot_timeout: 0s
   encryption:
     key: !secret api_encryption_key
 

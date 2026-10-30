@@ -7,7 +7,7 @@
 #
 # No Wi-Fi password is built in. Set it after flashing, either:
 #   - over USB, in the "Connect to Wi-Fi" step that web.esphome.io offers (Improv), or
-#   - by joining the "UFH Controller Setup" hotspot the board opens when it has no
+#   - by joining the "UFH Controller Setup" hotspot (password: ap_password in secrets.yaml) the board opens when it has no
 #     Wi-Fi, and picking the network on the page that appears.
 # The board stores the credentials in flash, so OTA updates keep them.
 
@@ -19,6 +19,7 @@ ethernet: !remove
 wifi:
   ap:
     ssid: "UFH Controller Setup"
+    password: !secret ap_password   # WPA2, 8+ characters
 
 captive_portal:
 

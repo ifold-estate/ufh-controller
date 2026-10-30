@@ -22,19 +22,23 @@ jobs:
         env:
           API_ENCRYPTION_KEY: ${{ secrets.API_ENCRYPTION_KEY }}
           WEB_PASSWORD: ${{ secrets.WEB_PASSWORD }}
+          AP_PASSWORD: ${{ secrets.AP_PASSWORD }}
         run: |
           python3 - <<'PY'
           import base64, json, os, secrets
           key = os.environ["API_ENCRYPTION_KEY"].strip()
           password = os.environ["WEB_PASSWORD"]
-          real = bool(key and password)
+          ap_password = os.environ["AP_PASSWORD"]
+          real = bool(key and password and ap_password)
           if not real:
               print("::warning::Repo secrets not set; building with throwaway secrets. Don't flash this firmware.")
               key = base64.b64encode(secrets.token_bytes(32)).decode()
               password = "ci-only"
+              ap_password = "ci-only-hotspot"
           open("secrets.yaml", "w").write(
               f"api_encryption_key: {json.dumps(key)}\n"
               f"web_password: {json.dumps(password)}\n"
+              f"ap_password: {json.dumps(ap_password)}\n"
           )
           with open(os.environ["GITHUB_ENV"], "a") as env:
               env.write(f"ARTIFACT_SUFFIX={'' if real else '-untrusted'}\n")
