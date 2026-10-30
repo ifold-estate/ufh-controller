@@ -144,7 +144,13 @@ Verification so far:
   about ±6–8 % while holding and 0 % with torque off. Writing a target with torque off still moves
   the servo, because the servo re-enables torque itself, so the torque switch can show OFF while
   the servo is holding. The built-in web server stopped answering HTTP once during testing, while
-  the API kept working. HA discovery, DIs, DS18B20s and Ethernet are not confirmed
+  the API kept working.
+- DS18B20s: three probes on GPIO21, named Boiler flow, Return and Mixed flow by address. Identified
+  by warming each one and labelled. They read room temperature (19–21 °C). The LCD shows all three.
+- Servo link through the TXS0108E is unreliable: it works for a while, then every reply arrives
+  with flipped bits, even with the servo idle. Cause: the shifter's B side needs about 0.65 × 5.2 V
+  = 3.4 V for a high, but the adapter's RXD only drives 3.3 V. Fix: wire the ESP32 straight to the
+  adapter (Tx → TXD, Rx → RXD, G → GND), which the adapter schematic supports. HA discovery, DIs, DS18B20s and Ethernet are not confirmed
   yet.
 
 ## 6. Environment notes (for Claude sessions)

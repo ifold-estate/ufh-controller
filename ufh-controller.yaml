@@ -220,16 +220,23 @@ number:
     mode: box
 
 # ---------------------------------------------------------------- Temperatures (DS18B20 on GPIO21)
-# Addresses are printed in the log at boot. Add one entry per sensor, e.g.:
-# sensor:
-#   - platform: dallas_temp
-#     address: 0x1c0000031edd2a28
-#     name: "Flow temperature"
-#     update_interval: 10s
+# Three probes at the mixer's ports. Addresses are printed in the log at boot. To find which is which,
+# warm one probe by hand and watch which reading rises.
 sensor:
   - platform: dallas_temp
-    id: temp_probe_1
-    name: "Temperature probe 1"
+    id: temp_boiler_flow
+    name: "Boiler flow temperature"
+    address: 0x120316815910ff28
+    update_interval: 10s
+  - platform: dallas_temp
+    id: temp_return
+    name: "Return temperature"
+    address: 0xa404168156b6ff28
+    update_interval: 10s
+  - platform: dallas_temp
+    id: temp_mixed_flow
+    name: "Mixed flow temperature"
+    address: 0x6a0416815ad7ff28
     update_interval: 10s
 
   - platform: uptime
@@ -313,13 +320,20 @@ display:
         else it.circle(cx, 150, 9, id(c_off));
       }
 
-      // Temperature and mixer
-      if (id(temp_probe_1).has_state())
-        it.printf(8, 175, id(font_small), id(c_text), "Probe 1: %.1f °C", id(temp_probe_1).state);
-      else
-        it.print(8, 175, id(font_small), id(c_dim), "Probe 1: --");
+      // Temperatures: boiler flow and return on one line, mixed flow (the controlled one) below
+      auto temp = [&](int x, int y, const char *label, sensor::Sensor *t) {
+        if (t->has_state() && !std::isnan(t->state))
+          it.printf(x, y, id(font_small), id(c_text), "%s %.1f°C", label, t->state);
+        else
+          it.printf(x, y, id(font_small), id(c_dim), "%s --", label);
+      };
+      temp(8, 166, "Boiler", id(temp_boiler_flow));
+      temp(165, 166, "Return", id(temp_return));
+      temp(8, 190, "Mixed", id(temp_mixed_flow));
+
+      // Mixer
       if (id(mixer_servo).is_online())
-        it.printf(8, 200, id(font_small), id(c_text), "Mixer: %d  load %.0f%%",
+        it.printf(8, 214, id(font_small), id(c_text), "Mixer: %d  load %.0f%%",
                   id(mixer_servo).last_position(), id(mixer_servo).last_load_percent());
       else
-        it.print(8, 200, id(font_small), id(c_dim), "Mixer: offline");
+        it.print(8, 214, id(font_small), id(c_dim), "Mixer: offline");
