@@ -195,10 +195,21 @@ Verification so far:
 - [ ] How many zones are there, and which relay drives what? Proposed: relays 1–6 zones, 7 pump,
       8 boiler CFH.
 - [x] What logic level does the Bus Servo Adapter A UART use? 3.3 V (TXD 5 V tolerant), so no level shifter.
-- [ ] NEST → DI interface. The DIs are bi-directional opto inputs rated 5–36 V. A 24 Vac call-for-heat
-      line peaks above 36 V, so it needs a design: a small 24 Vac relay per zone, or a resistor/opto
-      interface. Also, NEST thermostats need a common wire or power-stealing, which affects how CFH
-      is sensed.
+- [ ] NEST → DI interface. Proposed (31 Oct 2026): wire each thermostat's W straight to its DI and
+      the 24 Vac transformer's C to the DI common, with a 1 kΩ ¼ W series resistor per input.
+      - AC itself is fine: the inputs use bi-directional optos (anti-parallel LEDs), so both half
+        cycles light one, with no reverse-voltage stress. The output drops briefly at each zero
+        crossing (every 10 ms); the 50 ms `delayed_on_off` filter hides that.
+      - The 5–36 V rating is the limit: 24 Vac peaks ~34 V, but a lightly loaded transformer can sit
+        at 26–28 Vac (37–40 V peak). Under ~25.5 Vac measured open-circuit is within spec. The
+        internal series resistor is probably ~3.3 kΩ (implied by 5–36 V), so 1 kΩ extra brings a
+        40 V peak back under the 36 V current; check the AC current per input (a few mA).
+      - All thermostats and the DI common must share one 24 Vac transformer.
+      - NEST needs a C wire. Power-stealing pushes pulses through W when off, and a few-mA opto
+        input may read them as "calling". Measure W–C with the thermostat off (should be ~0 V).
+        Without C wires, use a 24 Vac relay per zone (a proper load for the NEST) and feed its dry
+        contact to the DI instead.
+      - Keep this low-voltage wiring away from the 240 Vac pump/boiler wiring in the cabinet.
 - [ ] Which DS18B20 positions: flow (after the mixer) is essential, and return is recommended.
       Anything else, such as the boiler flow side?
 
