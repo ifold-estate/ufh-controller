@@ -176,6 +176,31 @@ Verification so far:
   `ufh-controller.yaml` (the Ethernet build) to the installed board: it would drop off Wi-Fi with
   no network, and recovery needs USB-C.
 
+## 5a. First hot commissioning test (6 Nov 2026)
+
+Relays driven by hand over the API, mixer valve turned by hand (servo not yet coupled), 45 °C mixed
+flow guard on CFH. Pump on speed setting 2 (of 3).
+
+- **Supply:** opening all five zone valves at once blew the 1 A fuse on the 24 Vac circuit, and the
+  controller (on the same circuit) lost power. Fitted 2 A, and opened the valves one a minute; no
+  problem since. The heating logic must stagger zone valves; ideally the board gets its own supply.
+- **Mixer direction:** clockwise (arrow right) = cooler, anticlockwise (arrow left) = hotter. Middle
+  setting gave ~40 °C with the boiler at ~55 °C and return ~23 °C.
+- **Timing:** heat reached the boiler-flow probe within a minute of CFH (17.8 → 30 °C in 1 min,
+  45 °C in 2 min, ~55 °C after 6 min, ~62 °C after an hour), much faster than the 5 min expected
+  (the boiler was probably warm). The return took ~3 min after hot water reached the floor to start
+  rising, then climbed from ~16 °C to ~32 °C over an hour.
+- **Disturbances seen (all at a fixed mixer position):**
+  - The return warming pushes the mixed flow up (~+10 °C in a few minutes as the loops flush).
+  - Radiators on another thermostat starting reduced the boiler-side pressure, so less hot water
+    reached the mixer: mixed flow fell ~2 °C with the boiler flow unchanged.
+  - Their cold water then reached the boiler: boiler flow fell ~63 → 51 °C over 5 min while still
+    firing, and took ~15 min to recover; the mixed flow followed it down ~5 °C.
+  - So no fixed valve position holds a temperature: the mixer needs closed-loop control (PID on
+    the mixed probe, feed-forward from boiler flow and return).
+- **Manifold:** one zone valve (first of the 10 pipes) is broken, so that loop stayed cold; a spare is
+  to be fitted. Several other return pipes stayed cold for a long time: long runs or poor balancing.
+
 ## 6. Environment notes (for Claude sessions)
 
 - In the cloud workspace, install ESPHome with `python3 -m venv .venv && .venv/bin/pip install esphome`.
@@ -192,8 +217,10 @@ Verification so far:
 **Questions for Jon:**
 
 - [ ] How is HA installed: HA OS/Supervised (ESPHome add-on available) or Container/Core? (HA 2026.10.2 runs at 192.168.1.194:8123; install type still unknown.)
-- [ ] How many zones are there, and which relay drives what? Proposed: relays 1–6 zones, 7 pump,
-      8 boiler CFH.
+- [x] Relay wiring (6 Nov 2026): relay 1 boiler CFH, relay 2 floor circulation pump, relay 3 spare,
+      relays 4–8 five zone valves (which zone each feeds is still to be mapped). DI1–4 are the
+      Playroom, Kitchen, Booth and Lounge thermostats. The LCD still uses the old plan (8 CFH,
+      7 pump, 1–6 zones) and needs updating.
 - [x] What logic level does the Bus Servo Adapter A UART use? 3.3 V (TXD 5 V tolerant), so no level shifter.
 - [ ] NEST → DI interface. Proposed (31 Oct 2026): wire each thermostat's W straight to its DI and
       the 24 Vac transformer's C to the DI common, with a 1 kΩ ¼ W series resistor per input.
