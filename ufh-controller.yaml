@@ -9,8 +9,8 @@ substitutions:
   # (more margin, and plenty fast for this job). A new servo needs the same change.
   servo_baud: "115200"
   servo_id: "1"
-  # Servo positions for a fully cold and fully hot mixer, for the % on the LCD. Placeholders until
-  # the end-stop calibration routine sets them.
+  # Initial servo positions for a fully cold and fully hot mixer. After mounting the servo, set the
+  # real ones from HA ("Mixer cold position" / "Mixer hot position"); they are kept in flash.
   mixer_pos_cold: "0"
   mixer_pos_hot: "1023"
 
@@ -22,7 +22,8 @@ esphome:
     name: ifold-estate.ufh-controller
     version: "0.1.0"
   includes:
-    - ufh_screen.h   # LCD heat-flow screen (preview it with tools/screen_preview/render.py)
+    - ufh_screen.h      # LCD heat-flow screen (preview it with tools/screen_preview/render.py)
+    - mixer_control.h   # mixed-flow control and over-temperature cut-out (test: tools/mixer_sim)
 
 esp32:
   variant: esp32s3
@@ -113,6 +114,7 @@ time:
             id: rtc_time
 
 # ---------------------------------------------------------------- Relays (all OFF at boot)
+# Relay 1 boiler CFH, 2 floor circulation pump, 3 spare, 4-8 zone valves (zones not yet mapped).
 switch:
   - platform: gpio
     id: relay1
@@ -158,6 +160,19 @@ switch:
   - platform: scs_servo
     name: "Mixer servo torque"
     restore_mode: ALWAYS_OFF
+  # Automatic mixed-flow control. Off by default until the servo is mounted and its cold/hot
+  # positions are set. The over-temperature cut-out works either way.
+  - platform: template
+    id: mixer_auto
+    name: "Mixer auto"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: |-
+          // Start the controller from where the valve actually is.
+          float span = id(mixer_hot_pos).state - id(mixer_cold_pos).state;
+          if (id(mixer_servo).is_online() && std::fabs(span) > 1)
+            id(mixer_ctl).set_opening((id(mixer_servo).last_position() - id(mixer_cold_pos).state) / span);
 
 # ---------------------------------------------------------------- Digital inputs (opto-isolated)
 binary_sensor:
@@ -226,6 +241,76 @@ number:
   - platform: scs_servo
     name: "Mixer servo target"
     mode: box
+  # Mixer control settings (kept in flash)
+  - platform: template
+    id: mixed_setpoint
+    name: "Mixed flow setpoint"
+    unit_of_measurement: "°C"
+    min_value: 20
+    max_value: 50
+    step: 0.5
+    initial_value: 35
+    optimistic: true
+    restore_value: true
+    mode: box
+  - platform: template
+    id: mixed_limit
+    name: "Mixed flow limit"
+    unit_of_measurement: "°C"
+    min_value: 30
+    max_value: 55
+    step: 0.5
+    initial_value: 45
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: mixer_kp
+    name: "Mixer gain"
+    unit_of_measurement: "%/°C"
+    min_value: 0
+    max_value: 20
+    step: 0.1
+    initial_value: 2.5
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: mixer_ti
+    name: "Mixer integral time"
+    unit_of_measurement: "s"
+    min_value: 10
+    max_value: 1800
+    step: 5
+    initial_value: 90
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: mixer_cold_pos
+    name: "Mixer cold position"
+    min_value: 0
+    max_value: 1023
+    step: 1
+    initial_value: ${mixer_pos_cold}
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: mixer_hot_pos
+    name: "Mixer hot position"
+    min_value: 0
+    max_value: 1023
+    step: 1
+    initial_value: ${mixer_pos_hot}
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
 
 # ---------------------------------------------------------------- Temperatures (DS18B20 on GPIO21)
 # Three probes at the mixer's ports. Addresses are printed in the log at boot. To find which is which,
@@ -245,7 +330,13 @@ sensor:
     id: temp_mixed_flow
     name: "Mixed flow temperature"
     address: 0x6a0416815ad7ff28
-    update_interval: 10s
+    update_interval: 5s   # the controlled value: read as often as the control loop runs
+  - platform: template
+    id: mixer_opening
+    name: "Mixer opening"
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never   # published by the control loop
 
   - platform: uptime
     name: "Uptime"
@@ -300,7 +391,7 @@ display:
     rotation: 90
     # Redrawn by the interval below: fast while a pump runs (to animate the flow), slow otherwise.
     update_interval: never
-    # Relays: 1-6 zones (Playroom, Kitchen x2, Booth x2, Lounge), 7 floor pump, 8 boiler CFH + pump.
+    # Relays: 1 boiler CFH + pump, 2 floor pump, 4-8 zone valves.
     # DI1-4: room thermostats.
     lambda: |-
       auto t = [](sensor::Sensor *s) { return s->has_state() ? s->state : NAN; };
@@ -308,21 +399,24 @@ display:
       st.boiler = t(id(temp_boiler_flow));
       st.mixed = t(id(temp_mixed_flow));
       st.ret = t(id(temp_return));
-      if (id(mixer_servo).is_online()) {
-        float pct = 100.0f * (id(mixer_servo).last_position() - ${mixer_pos_cold}) /
-                    float(${mixer_pos_hot} - ${mixer_pos_cold});
+      float span = id(mixer_hot_pos).state - id(mixer_cold_pos).state;
+      if (id(mixer_servo).is_online() && std::fabs(span) > 1) {
+        float pct = 100.0f * (id(mixer_servo).last_position() - id(mixer_cold_pos).state) / span;
         st.mixer_pct = std::max(0.0f, std::min(100.0f, pct));
       }
-      st.boiler_on = id(relay8).state;
-      st.floor_pump_on = id(relay7).state;
-      switch_::Switch *zones[6] = {id(relay1), id(relay2), id(relay3), id(relay4), id(relay5), id(relay6)};
-      for (int i = 0; i < 6; i++) st.zone[i] = zones[i]->state;
+      st.boiler_on = id(relay1).state;
+      st.floor_pump_on = id(relay2).state;
+      // Zone valves on relays 4-8; which dot is which room is provisional until the zones are mapped.
+      switch_::Switch *zones[5] = {id(relay4), id(relay5), id(relay6), id(relay7), id(relay8)};
+      for (int i = 0; i < 5; i++) st.zone[i] = zones[i]->state;
       // DI1-4: thermostats in Playroom, Kitchen, Booth, Lounge (on = calling for heat)
       binary_sensor::BinarySensor *stats[4] = {id(di1), id(di2), id(di3), id(di4)};
       for (int i = 0; i < 4; i++) st.room_calling[i] = stats[i]->state;
-      // No heating logic yet, so the relays are driven by hand. The heating logic will set these.
-      st.mode = "MANUAL";
-      if (!id(mixer_servo).is_online()) st.status = "Mixer offline";
+      // Relays are still switched by hand; the mixer may be automatic.
+      st.mode = id(mixer_auto).state ? "AUTO" : "MANUAL";
+      auto cs = id(mixer_ctl).status();
+      if (cs != mixer_control::Status::OFF) st.status = mixer_control::status_text(cs);
+      else if (!id(mixer_servo).is_online()) st.status = "Mixer offline";
       else if (st.boiler_on) st.status = "Heating";
       else if (st.floor_pump_on) st.status = "Circulating";
       else st.status = "Idle";
@@ -334,7 +428,61 @@ interval:
     then:
       - lambda: |-
           static uint8_t ticks = 0;
-          if (id(relay7).state || id(relay8).state || ++ticks >= 10) {
+          if (id(relay1).state || id(relay2).state || ++ticks >= 10) {
             ticks = 0;
             id(lcd).update();
           }
+
+  # Mixed-flow control and over-temperature cut-out (mixer_control.h), every 5 s.
+  - interval: 5s
+    then:
+      - lambda: |-
+          static uint32_t last_ms = millis();
+          static int last_goal = -1;
+          auto t = [](sensor::Sensor *s) { return s->has_state() ? s->state : NAN; };
+          mixer_control::Inputs in;
+          in.boiler = t(id(temp_boiler_flow));
+          in.mixed = t(id(temp_mixed_flow));
+          in.ret = t(id(temp_return));
+          in.pump_on = id(relay2).state;
+          in.automatic = id(mixer_auto).state;
+          in.dt = (millis() - last_ms) / 1000.0f;
+          last_ms = millis();
+          mixer_control::Settings cfg;
+          cfg.setpoint = id(mixed_setpoint).state;
+          cfg.limit = id(mixed_limit).state;
+          cfg.kp = id(mixer_kp).state;
+          cfg.ti = id(mixer_ti).state;
+          auto &c = id(mixer_ctl);
+          bool drive = c.update(in, cfg);
+
+          // Over-temperature (or no mixed reading for 30 s): CFH off, and kept off until it clears.
+          if (c.over_temp() && id(relay1).state) {
+            ESP_LOGW("mixer", "Mixed flow %.1f °C over limit %.1f °C (or no reading): boiler CFH off",
+                     in.mixed, cfg.limit);
+            id(relay1).turn_off();
+          }
+
+          if (drive && id(mixer_servo).is_online()) {
+            int goal = lroundf(id(mixer_cold_pos).state + c.opening() * (id(mixer_hot_pos).state - id(mixer_cold_pos).state));
+            if (last_goal < 0 || std::abs(goal - last_goal) >= 2) {
+              id(mixer_servo).set_goal_position(goal);
+              last_goal = goal;
+            }
+          }
+          if (!in.automatic) last_goal = -1;
+          float pct = c.opening() * 100;
+          if (in.automatic && (!id(mixer_opening).has_state() || std::fabs(id(mixer_opening).state - pct) >= 1))
+            id(mixer_opening).publish_state(pct);
+          const char *st = mixer_control::status_text(c.status());
+          if (id(heating_status).state != st) id(heating_status).publish_state(st);
+
+globals:
+  - id: mixer_ctl
+    type: mixer_control::Controller
+
+text_sensor:
+  - platform: template
+    id: heating_status
+    name: "Heating status"
+    update_interval: never

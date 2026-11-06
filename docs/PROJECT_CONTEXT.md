@@ -201,6 +201,32 @@ flow guard on CFH. Pump on speed setting 2 (of 3).
 - **Manifold:** one zone valve (first of the 10 pipes) is broken, so that loop stayed cold; a spare is
   to be fitted. Several other return pipes stayed cold for a long time: long runs or poor balancing.
 
+## 5b. Mixer control (v0.2, from 6 Nov 2026)
+
+`mixer_control.h`, run every 5 s from an `interval:` in `ufh-controller.yaml`:
+
+- Opening = feed-forward (setpoint − return) / (boiler − return) + PI trim on the mixed probe.
+  Integral frozen while saturated or while the boiler is below setpoint + 2 °C (anti-windup);
+  trim limited to ±30 %; opening changes at most 5 % per update.
+- Runs only with "Mixer auto" on (default off, restored from flash) and the floor pump (relay 2) on;
+  otherwise the valve holds still. Switching auto on starts from the servo's actual position.
+- Over-temperature cut-out, in auto **and** manual: mixed > "Mixed flow limit" (45 °C), or no mixed
+  reading for 30 s → CFH (relay 1) off, kept off until the mix is 5 °C under the limit; in auto the
+  valve also goes to cold. This replaces the guard script used in the 6 Nov test.
+- HA entities: Mixer auto, Mixed flow setpoint (35 °C default), Mixed flow limit, Mixer gain
+  (2.5 %/°C), Mixer integral time (90 s), Mixer cold/hot position (servo counts), Mixer opening,
+  Heating status. The mixed probe reads every 5 s.
+- `tools/mixer_sim/sim.cpp` checks the safety rules and runs the loop against a plant modelled on
+  the 6 Nov test (boiler warm-up, return warming, radiator pressure drop and boiler dip, linear and
+  S-curve valves). Kp 2.5 / Ti 90 holds within ~1.5 °C; oscillation starts near Kp 10.
+- **Commissioning, once the servo is on the valve:**
+  1. Leave Mixer auto off. Move the servo with "Mixer servo target" to find the full-cold end
+     (valve clockwise) and the full-hot end; watch "Mixer servo load" so it isn't forced past a stop.
+  2. Set "Mixer cold position" and "Mixer hot position" a little inside those ends. Either may be
+     the larger number; that sets the direction.
+  3. Set the setpoint, turn the pump on, then Mixer auto on; watch Mixer opening and the mixed
+     flow. If it hunts, lower the gain; if it is slow to settle, shorten the integral time.
+
 ## 6. Environment notes (for Claude sessions)
 
 - In the cloud workspace, install ESPHome with `python3 -m venv .venv && .venv/bin/pip install esphome`.
@@ -281,4 +307,4 @@ call to hot water at the mixer. The zone actuators take about 2 minutes to open.
    - flow over-temperature cut-out (close the mixer, drop CFH)
    - safe behaviour on sensor loss or servo offline
    - watchdog defaults while HA is unreachable
-7. LCD: have the heating logic drive the mode (AUTO / OVERRIDE / MANUAL) and status (Warming, Holding, Waiting…).
+7. LCD: map the zone dots to relays 4–8 once the zones are known; have the heating logic drive the mode (AUTO / OVERRIDE / MANUAL) and status (Warming, Holding, Waiting…).

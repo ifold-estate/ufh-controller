@@ -19,6 +19,7 @@ ESPHome firmware for an underfloor-heating manifold controller, integrated with 
 | `ufh-controller.yaml` | Main ESPHome configuration |
 | `ufh-controller-wifi.yaml` | Wi-Fi build of the main configuration (the one installed) |
 | `components/scs_servo/` | Custom ESPHome component for Feetech SCS bus servos |
+| `mixer_control.h` | Mixed-flow control and over-temperature cut-out (`tools/mixer_sim` tests it) |
 | `ufh_screen.h` | LCD heat-flow screen (preview with `tools/screen_preview/render.py`) |
 | `fonts/` | DejaVu Sans fonts for the LCD (bundled, see `LICENSE-DejaVu.txt`) |
 | `secrets.example.yaml` | Template for `secrets.yaml` (not committed) |
