@@ -64,6 +64,16 @@ struct Settings {
   float ti = 120;         // s integral time
   float max_step = 0.05;  // max share change per update (fraction)
   bool valve_curve = true;  // convert share -> opening through the measured curve (false: linear)
+  // Band mode (simulated 7 Nov 2026, tools/mixer_sim/band_sim.py): instead of holding the setpoint,
+  // let the mix swing between band_low and band_high by switching CFH (the controller owns CFH),
+  // with the valve set coarsely so the mix can't pass band_high.
+  bool band = false;
+  float band_low = 35, band_high = 42;
+  float boiler_max = 70;       // hottest the boiler is assumed to get when we call for heat
+  bool cap = false;            // also drop CFH when the boiler flow reaches cap_temp...
+  float cap_temp = 50;
+  float cap_restart = 10;      // ...and call again this far below it
+  float cap_overshoot = 8;     // the boiler keeps heating ~2 min after CFH drops
   float boiler_expect_rise = 20;  // °C over setpoint the boiler is assumed to reach while it warms
 };
 
@@ -74,7 +84,10 @@ struct Inputs {
   float dt = 5;                                // s since the last update
 };
 
-enum class Status : uint8_t { OFF, PUMP_OFF, PROBE_FAULT, OVER_TEMP, WAITING_BOILER, WARMING, HOLDING, COOLING };
+enum class Status : uint8_t {
+  OFF, PUMP_OFF, PROBE_FAULT, OVER_TEMP, WAITING_BOILER, WARMING, HOLDING, COOLING,
+  HEATING, BOILER_CAP, FREE_WHEEL,  // band mode
+};
 
 inline const char *status_text(Status s) {
   switch (s) {
@@ -86,6 +99,9 @@ inline const char *status_text(Status s) {
     case Status::WARMING: return "Warming";
     case Status::HOLDING: return "Holding";
     case Status::COOLING: return "Cooling";
+    case Status::HEATING: return "Heating";
+    case Status::BOILER_CAP: return "Boiler cap";
+    case Status::FREE_WHEEL: return "Free-wheel";
   }
   return "";
 }
@@ -105,9 +121,11 @@ class Controller {
     if (over_temp_ && !std::isnan(in.mixed) && in.mixed < cfg.limit - 5) over_temp_ = false;
 
     // --- Control ---
+    cfh_ = false;
     if (!in.automatic) {
       integral_ = 0;
       running_ = false;
+      band_started_ = false;
       status_ = over_temp_ ? Status::OVER_TEMP : Status::OFF;
       return false;
     }
@@ -125,9 +143,12 @@ class Controller {
     if (!in.pump_on) {
       integral_ = 0;
       running_ = false;
+      band_started_ = false;
       status_ = Status::PUMP_OFF;
       return false;  // hold position, ready for the next start
     }
+
+    if (cfg.band) return band_(in, cfg);
 
     const float sp = cfg.setpoint;
     const bool boiler_cold = !std::isnan(in.boiler) && in.boiler < sp + 2;
@@ -192,8 +213,40 @@ class Controller {
     share_ = curve ? valve::share(opening_) : opening_;
   }
   float share() const { return share_; }
+  // Band mode: whether CFH should be on (the caller switches the relay while in auto band mode).
+  bool cfh() const { return cfh_; }
 
  protected:
+  // Band mode: heating phase (CFH wanted) or free-wheel; boiler cap holding CFH off.
+  bool band_(const Inputs &in, const Settings &cfg) {
+    if (!band_started_) {  // start heating unless the mix is already at the top of the band
+      heat_ = in.mixed < cfg.band_high;
+      cap_off_ = false;
+      band_started_ = true;
+    }
+    if (heat_ && in.mixed >= cfg.band_high) heat_ = false;
+    else if (!heat_ && in.mixed <= cfg.band_low) heat_ = true;
+    if (!heat_ || !cfg.cap || std::isnan(in.boiler)) cap_off_ = false;
+    else if (in.boiler >= cfg.cap_temp) cap_off_ = true;
+    else if (in.boiler <= cfg.cap_temp - cfg.cap_restart) cap_off_ = false;
+    cfh_ = heat_ && !cap_off_;
+
+    // Valve: keep the mix at or under the top of the band. Heating: for the hottest the boiler may
+    // get (assumed max, or cap + overshoot, or its actual temperature if hotter: radiators or hot
+    // water may drive it up). Free-wheel: for its actual, falling temperature, so the leftover heat
+    // is used. Without boiler/return readings, hold.
+    if (!std::isnan(in.boiler) && !std::isnan(in.ret)) {
+      float hot = heat_ ? (cfg.cap ? cfg.cap_temp + cfg.cap_overshoot : cfg.boiler_max) : in.boiler;
+      hot = std::max({hot, in.boiler, in.ret + 3});
+      share_ = std::clamp((cfg.band_high - in.ret) / (hot - in.ret), 0.0f, 1.0f);
+      opening_ = cfg.valve_curve ? valve::opening(share_) : share_;
+    }
+    running_ = true;
+    status_ = !heat_ ? Status::FREE_WHEEL : cap_off_ ? Status::BOILER_CAP : Status::HEATING;
+    return true;
+  }
+
+  bool cfh_ = false, heat_ = false, cap_off_ = false, band_started_ = false;
   float opening_ = 0;
   float share_ = 0;     // boiler-water share asked for
   float integral_ = 0;  // °C·s

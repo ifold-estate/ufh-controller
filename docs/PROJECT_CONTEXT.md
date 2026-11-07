@@ -419,6 +419,16 @@ peaks (and with a wide restart gap the mean), at the cost of shorter CFH cycles 
 per hour. A lower flow setting on the boiler itself, if it has one, would do the same without the
 cycling.
 
+**v0.8 (band control in the firmware):** "Mixer mode" Band (default) or Fine. In Band, with Mixer
+auto on and the pump running, **the controller switches CFH (relay 1)**: on in the heating phase,
+off at "Band high" (free-wheel), on again at "Band low"; off whenever the pump is off, and switched
+off when Mixer auto is turned off. The valve is set from the measured curve so the mix stays under
+Band high: for "Boiler max assumed" (70 °C) while heating, or the boiler's actual temperature if
+hotter; for its actual temperature while free-wheeling. Optional "Boiler cap" (off by default):
+CFH also off at "Boiler cap temperature" (50 °C) until "restart below" (10 °C) lower. Status shows
+Heating / Boiler cap / Free-wheel. The over-temperature cut-out still overrides everything.
+Includes v0.7 (valve curve, cam debounce, no hunting).
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.

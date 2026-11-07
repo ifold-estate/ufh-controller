@@ -239,6 +239,40 @@ void safety_checks() {
     for (int i = 0; i < 4000; i++) tr.sample(sv.raw(), 0, 0.25f, false);
     assert(tr.in_gap());
   }
+  // Band mode: CFH follows the band, the cap holds it off, valve keeps the mix under band_high.
+  {
+    Settings cfg;
+    cfg.band = true;
+    Controller c;
+    auto step = [&](float boiler, float mixed, float ret) {
+      Inputs in;
+      in.boiler = boiler; in.mixed = mixed; in.ret = ret; in.pump_on = true; in.automatic = true; in.dt = 5;
+      c.update(in, cfg);
+    };
+    step(20, 20, 18);
+    assert(c.cfh() && c.status() == Status::HEATING);
+    // valve: share = (42-18)/(70-18) = 0.46 -> opening on the curve
+    assert(std::fabs(c.share() - 24.0f / 52) < 0.01f);
+    step(60, 42.5, 30);
+    assert(!c.cfh() && c.status() == Status::FREE_WHEEL);  // top of the band: free-wheel
+    // free-wheel valve: (42-30)/(60-30) = 0.4 for the boiler's actual temperature
+    assert(std::fabs(c.share() - 0.4f) < 0.01f);
+    step(50, 38, 30);
+    assert(!c.cfh());                                       // still in the band
+    step(45, 34.5, 30);
+    assert(c.cfh());                                        // bottom: heat again
+    cfg.cap = true;                                         // cap 50, restart 40
+    step(50.5, 37, 30);
+    assert(!c.cfh() && c.status() == Status::BOILER_CAP);
+    step(45, 37, 30);
+    assert(!c.cfh());                                       // not yet 10 below
+    step(39.5, 37, 30);
+    assert(c.cfh());
+    step(80, 37, 30);                                       // radiators drove the boiler hot
+    assert(std::fabs(c.share() - 12.0f / 50) < 0.01f);      // valve sized for 80 °C
+    step(80, 46, 30);
+    assert(!c.cfh() && c.over_temp());                      // safety still wins
+  }
   printf("safety checks passed\n\n");
 }
 

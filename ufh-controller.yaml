@@ -214,12 +214,38 @@ switch:
           mixer_control::positioner().request_home();
           mixer_control::instance().set_opening(0);
           mixer_control::manual_target() = NAN;
+    turn_off_action:
+      - lambda: |-
+          // In band mode the controller switches CFH; leaving auto hands it back switched off.
+          if (id(mixer_mode).active_index().value_or(0) == 0 && id(relay1).state) {
+            ESP_LOGI("mixer", "Mixer auto off: boiler CFH off");
+            id(relay1).turn_off();
+          }
+  # Band mode: also drop CFH when the boiler flow reaches "Boiler cap" (off by default).
+  - platform: template
+    id: boiler_cap_on
+    name: "Boiler cap"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
   # Direction: on if positive drive turns the valve towards cold. Find it with the jog buttons.
   - platform: template
     id: mixer_reverse
     name: "Mixer reverse"
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+
+# Band: the mix swings between "Band low" and "Band high" by switching CFH (the controller owns CFH
+# while Mixer auto is on and the pump runs); the valve is set coarsely. Fine: hold the setpoint.
+select:
+  - platform: template
+    id: mixer_mode
+    name: "Mixer mode"
+    options: ["Band", "Fine"]
+    initial_option: "Band"
+    optimistic: true
+    restore_value: true
     entity_category: config
 
 # ---------------------------------------------------------------- Mixer servo commissioning
@@ -381,6 +407,64 @@ number:
     max_value: 55
     step: 0.5
     initial_value: 45
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: band_low
+    name: "Band low"
+    unit_of_measurement: "°C"
+    min_value: 20
+    max_value: 50
+    step: 0.5
+    initial_value: 35
+    optimistic: true
+    restore_value: true
+    mode: box
+  - platform: template
+    id: band_high
+    name: "Band high"
+    unit_of_measurement: "°C"
+    min_value: 20
+    max_value: 50
+    step: 0.5
+    initial_value: 42
+    optimistic: true
+    restore_value: true
+    mode: box
+  - platform: template
+    id: boiler_max
+    name: "Boiler max assumed"   # hottest the boiler gets when we call (sets the valve's limit)
+    unit_of_measurement: "°C"
+    min_value: 40
+    max_value: 90
+    step: 1
+    initial_value: 70
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: boiler_cap_temp
+    name: "Boiler cap temperature"
+    unit_of_measurement: "°C"
+    min_value: 35
+    max_value: 80
+    step: 1
+    initial_value: 50
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: boiler_cap_restart
+    name: "Boiler cap restart below"
+    unit_of_measurement: "°C"
+    min_value: 2
+    max_value: 30
+    step: 1
+    initial_value: 10
     optimistic: true
     restore_value: true
     mode: box
@@ -665,7 +749,24 @@ interval:
             cfg.limit = id(mixed_limit).state;
             cfg.kp = id(mixer_kp).state;
             cfg.ti = id(mixer_ti).state;
+            cfg.band = id(mixer_mode).active_index().value_or(0) == 0;
+            cfg.band_low = id(band_low).state;
+            cfg.band_high = id(band_high).state;
+            cfg.boiler_max = id(boiler_max).state;
+            cfg.cap = id(boiler_cap_on).state;
+            cfg.cap_temp = id(boiler_cap_temp).state;
+            cfg.cap_restart = id(boiler_cap_restart).state;
             c.update(in, cfg);
+
+            // Band mode in auto: the controller switches CFH (off whenever the pump is off).
+            if (automatic && cfg.band) {
+              const bool want = pump_on && c.cfh();
+              if (want != id(relay1).state) {
+                ESP_LOGI("mixer", "Band: boiler CFH %s (%s, mix %.1f °C, boiler %.1f °C)", want ? "on" : "off",
+                         mixer_control::status_text(c.status()), in.mixed, in.boiler);
+                if (want) id(relay1).turn_on(); else id(relay1).turn_off();
+              }
+            }
 
             // Over-temperature (or no mixed reading for 30 s): CFH off, and kept off until it clears.
             if (c.over_temp() && id(relay1).state) {
