@@ -277,21 +277,49 @@ binary_sensor:
     name: "Input 5"
     pin: { number: GPIO8, inverted: true, mode: { input: true, pullup: true } }
     filters: [delayed_on_off: 50ms]
+    # Mixer gearbox cam switch: record where the shaft is when it changes (state is 50 ms late).
+    on_state:
+      - lambda: |-
+          auto *sv = id(mixer_servo);
+          auto &tr = mixer_control::positioner().tracker();
+          ESP_LOGI("cam", "DI5 %s: raw %d x %.0f%s dir %+d t %u ms", x ? "ON " : "OFF", sv->last_position(), tr.x(),
+                   tr.in_gap() ? " (gap)" : "", sv->run_direction(), (unsigned) sv->run_elapsed_ms());
   - platform: gpio
     id: di6
     name: "Input 6"
     pin: { number: GPIO9, inverted: true, mode: { input: true, pullup: true } }
     filters: [delayed_on_off: 50ms]
+    # Mixer gearbox cam switch: record where the shaft is when it changes (state is 50 ms late).
+    on_state:
+      - lambda: |-
+          auto *sv = id(mixer_servo);
+          auto &tr = mixer_control::positioner().tracker();
+          ESP_LOGI("cam", "DI6 %s: raw %d x %.0f%s dir %+d t %u ms", x ? "ON " : "OFF", sv->last_position(), tr.x(),
+                   tr.in_gap() ? " (gap)" : "", sv->run_direction(), (unsigned) sv->run_elapsed_ms());
   - platform: gpio
     id: di7
     name: "Input 7"
     pin: { number: GPIO10, inverted: true, mode: { input: true, pullup: true } }
     filters: [delayed_on_off: 50ms]
+    # Mixer gearbox cam switch: record where the shaft is when it changes (state is 50 ms late).
+    on_state:
+      - lambda: |-
+          auto *sv = id(mixer_servo);
+          auto &tr = mixer_control::positioner().tracker();
+          ESP_LOGI("cam", "DI7 %s: raw %d x %.0f%s dir %+d t %u ms", x ? "ON " : "OFF", sv->last_position(), tr.x(),
+                   tr.in_gap() ? " (gap)" : "", sv->run_direction(), (unsigned) sv->run_elapsed_ms());
   - platform: gpio
     id: di8
     name: "Input 8"
     pin: { number: GPIO11, inverted: true, mode: { input: true, pullup: true } }
     filters: [delayed_on_off: 50ms]
+    # Mixer gearbox cam switch: record where the shaft is when it changes (state is 50 ms late).
+    on_state:
+      - lambda: |-
+          auto *sv = id(mixer_servo);
+          auto &tr = mixer_control::positioner().tracker();
+          ESP_LOGI("cam", "DI8 %s: raw %d x %.0f%s dir %+d t %u ms", x ? "ON " : "OFF", sv->last_position(), tr.x(),
+                   tr.in_gap() ? " (gap)" : "", sv->run_direction(), (unsigned) sv->run_elapsed_ms());
 
   - platform: status
     name: "Status"

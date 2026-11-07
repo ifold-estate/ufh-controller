@@ -83,6 +83,10 @@ class SCSServo : public PollingComponent, public uart::UARTDevice {
   // Polled during a run, after each sample: return true to stop driving now.
   void set_stop_check(std::function<bool()> f) { this->stop_check_ = std::move(f); }
   bool is_running() const { return this->running_; }
+  // Direction of the run in progress (+1/-1, including its coast), 0 when idle.
+  int run_direction() const { return this->running_ ? (this->run_duty_ > 0 ? 1 : -1) : 0; }
+  // Milliseconds since the current run started (0 when idle).
+  uint32_t run_elapsed_ms() const { return this->running_ ? millis() - this->run_start_ : 0; }
   const RunResult &last_run() const { return this->last_run_; }
   bool set_goal_position(uint16_t position);
   bool set_torque(bool enable);
