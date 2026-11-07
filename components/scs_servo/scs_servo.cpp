@@ -104,15 +104,35 @@ bool SCSServo::set_torque(bool enable) {
 
 bool SCSServo::set_motor_mode(bool motor) {
   ESP_LOGI(TAG, "Setting servo ID %u to %s mode", this->servo_id_, motor ? "motor (continuous)" : "position");
+  // EEPROM writes can take longer to acknowledge than normal ones: wait longer and retry each step.
+  const uint32_t saved_timeout = this->response_timeout_ms_;
+  this->response_timeout_ms_ = 100;
+  auto write = [this](uint8_t reg, const std::vector<uint8_t> &data, const char *what) {
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      if (this->write_registers_(reg, data))
+        return true;
+      ESP_LOGW(TAG, "  %s: no acknowledgement (attempt %d)", what, attempt);
+      delay(20);
+    }
+    return false;
+  };
   std::vector<uint8_t> limits = motor ? std::vector<uint8_t>{0, 0, 0, 0} : std::vector<uint8_t>{0, 0, 0x03, 0xFF};
-  bool ok = this->write_registers_(SCS_REG_LOCK, {0}) && this->write_registers_(SCS_REG_MIN_ANGLE_LIMIT, limits);
-  ok = this->write_registers_(SCS_REG_LOCK, {1}) && ok;
+  bool ok = write(SCS_REG_LOCK, {0}, "unlock");
+  ok = write(SCS_REG_MIN_ANGLE_LIMIT, limits, "angle limits") && ok;
+  ok = write(SCS_REG_LOCK, {1}, "lock") && ok;
+  // Read back whatever happened, so the log always says which mode the servo is in.
   std::vector<uint8_t> check;
-  if (ok && this->read_registers_(SCS_REG_MIN_ANGLE_LIMIT, 4, &check))
-    ESP_LOGI(TAG, "Angle limits now %u / %u", (check[0] << 8) | check[1], (check[2] << 8) | check[3]);
-  else
-    ESP_LOGW(TAG, "Mode change failed");
-  return ok;
+  bool read_ok = false;
+  for (int attempt = 0; attempt < 3 && !read_ok; attempt++)
+    read_ok = this->read_registers_(SCS_REG_MIN_ANGLE_LIMIT, 4, &check);
+  this->response_timeout_ms_ = saved_timeout;
+  if (read_ok) {
+    uint16_t lo = (check[0] << 8) | check[1], hi = (check[2] << 8) | check[3];
+    ESP_LOGI(TAG, "Angle limits now %u / %u: %s mode", lo, hi, (lo == 0 && hi == 0) ? "motor" : "position");
+    return lo == 0 && hi == 0 ? motor : !motor;
+  }
+  ESP_LOGW(TAG, "Couldn't read the angle limits back");
+  return false;
 }
 
 bool SCSServo::set_pwm(int duty) {
