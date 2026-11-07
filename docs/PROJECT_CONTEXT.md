@@ -271,6 +271,22 @@ stall, measuring the cold end (from where the reading first leaves the gap) and 
 simulator (random gap readings, stiction, coast, lever play up to 30°) it calibrates within ~10 %,
 holds the mix within ~1 °C, and makes ~40 moves/hour when steady.
 
+**Position tests (7 Nov, after re-indexing; "Mixer manual opening" with auto off):**
+
+- Calibration found the hot end exactly (stall at raw 677, x = 2086) but put the cold end at −394,
+  ~400 counts too far back: the cold end sits at the top edge of window 0, where readings stick and
+  jump. Corrected by eye.
+- Lever play is large: reversing towards cold, the shaft moved to 33 % while the valve stayed at
+  50 %, so play ≈ 350 counts (~17 % of the stroke, ~70° of servo).
+- **Settings now in use:** Mixer cold end −175 (0 minus half the play), Mixer stroke 2086, Mixer play
+  350, Mixer home time 10 s, drive 30 %, kick 60 %, coast 50, deadband 3 %.
+- Checked by eye: 20 % → ~20 %, 50 % → exactly 50 % (in the gap), 75 % → ~80 % (deep in the gap),
+  then reversing: 33 % → ~33 %, and back up to 50 % → exactly 50 %.
+- Fixed on the way: "stopped on a stall" is decided when the move stops (the shaft springs back after
+  a stall), and each run's first reading no longer counts idle time as driving time.
+- To do: make calibration's cold-end estimate reliable (or keep setting it by eye), then test Mixer
+  auto with heat.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
