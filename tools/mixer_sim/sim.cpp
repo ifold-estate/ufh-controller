@@ -53,7 +53,7 @@ struct Servo {
 };
 
 // One full scenario: calibrate, then control the mixed flow against the 6 Nov plant.
-Result run(float kp, float ti, int valve_curve, float play_deg, bool print) {
+Result run(float kp, float ti, int valve_curve, float play_deg, bool print, float boiler_tau = 300) {
   Settings cfg;
   cfg.setpoint = 40;
   cfg.kp = kp;
@@ -108,7 +108,7 @@ Result run(float kp, float ti, int valve_curve, float play_deg, bool print) {
     float tb_target = control_started ? 62 : 18;
     if (t >= 1900) p = 0.75f;
     if (t >= 2000 && t < 2300) tb_target = 48;
-    tb += (tb_target - tb) * dt / (t >= 2000 && t < 2300 ? 120 : 300);
+    tb += (tb_target - tb) * dt / (t >= 2000 && t < 2300 ? 120 : boiler_tau);
     float u = std::clamp(sv.opening(), 0.0f, 1.0f);
     float h = valve_curve ? u * u * (3 - 2 * u) : u;
     h = p * h / (p * h + (1 - h) + 1e-6f);
@@ -141,7 +141,7 @@ Result run(float kp, float ti, int valve_curve, float play_deg, bool print) {
       n_track++;
     }
     if (t > 900) overshoot = std::max(overshoot, mix - cfg.setpoint);
-    if (t > 600) max_mix = std::max(max_mix, mix);
+    if (control_started) max_mix = std::max(max_mix, mix);
     if (t > 1200 && t < 1900) { mae += std::fabs(mix - cfg.setpoint); n_late++; }
     if (print && std::fmod(t, 300) < dt)
       printf("%4.0f min  boiler %5.1f  ret %5.1f  mixed %5.1f  target %3.0f%%  est %3.0f%%  valve %3.0f%%  raw %4d %s\n",
@@ -195,14 +195,15 @@ void safety_checks() {
 int main(int argc, char **argv) {
   safety_checks();
   float kp = argc > 2 ? atof(argv[1]) : 2.5f, ti = argc > 2 ? atof(argv[2]) : 90;
-  printf("S-curve valve, 15 deg lever play, cold end in the sensor gap:\n");
-  run(kp, ti, 1, 15, true);
+  printf("S-curve valve, 15 deg lever play, boiler already hot (as on 7 Nov):\n");
+  run(kp, ti, 1, 15, true, 60);
   printf("\n case                     | cal  stroke err | max mix  overshoot  err(20-32min) | worst est. error  moves/hr\n");
+  for (float tau : {300.0f, 60.0f})
   for (float play : {0.0f, 15.0f, 30.0f})
     for (int curve : {0, 1}) {
-      Result r = run(kp, ti, curve, play, false);
-      printf(" %-7s valve, play %2.0f deg | %s   %+5.1f%%    |  %5.1f    %5.1f       %5.2f       |      %4.1f%%        %3.0f\n",
-             curve ? "S-curve" : "linear", play, r.cal_ok ? "ok " : "BAD", r.cal_stroke_err * 100, r.max_mix,
+      Result r = run(kp, ti, curve, play, false, tau);
+      printf(" %s %-7s valve, play %2.0f deg | %s   %+5.1f%%    |  %5.1f    %5.1f       %5.2f       |      %4.1f%%        %3.0f\n",
+             tau < 100 ? "hot boiler " : "cold boiler", curve ? "S-curve" : "linear", play, r.cal_ok ? "ok " : "BAD", r.cal_stroke_err * 100, r.max_mix,
              r.overshoot, r.mae_late, r.track_err * 100, r.moves / 1.5f);
     }
 }

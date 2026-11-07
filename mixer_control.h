@@ -28,6 +28,7 @@ struct Settings {
   float kp = 1.0;         // % opening per °C error
   float ti = 120;         // s integral time
   float max_step = 0.05;  // max opening change per update (fraction)
+  float boiler_expect_rise = 20;  // °C over setpoint the boiler is assumed to reach while it warms
 };
 
 struct Inputs {
@@ -93,26 +94,47 @@ class Controller {
     }
 
     const float sp = cfg.setpoint;
-    const bool have_ff = !std::isnan(in.boiler) && !std::isnan(in.ret) && in.boiler - in.ret > 3;
-    float ff = have_ff ? (sp - in.ret) / (in.boiler - in.ret) : opening_;
-    ff = std::clamp(ff, 0.0f, 1.0f);
     const bool boiler_cold = !std::isnan(in.boiler) && in.boiler < sp + 2;
+    // Boiler flow rising quickly (warm-up): the mix will follow on its own, and the mixed probe lags.
+    if (!std::isnan(in.boiler) && !std::isnan(last_boiler_) && in.dt > 0)
+      boiler_rate_ = 0.6f * boiler_rate_ + 0.4f * (in.boiler - last_boiler_) / in.dt;
+    last_boiler_ = in.boiler;
+    const bool boiler_rising = boiler_rate_ > 2.0f / 60;  // > 2 °C/min
+    // While the boiler is still cold, blend for the boiler temperature it will soon deliver, not
+    // the current one: opening fully gains nothing while it's cold, and lets the first hot water
+    // straight through when it arrives (6 Nov/7 Nov tests: boiler 18 -> 50 °C in under 2 minutes).
+    // While it's still rising, blend for where it will be in a couple of minutes: blending for its
+    // current temperature would open the valve just before the rest of the heat arrives.
+    const float expect = std::max(in.boiler, sp + cfg.boiler_expect_rise);
+    const float predicted = std::clamp(in.boiler + std::max(0.0f, boiler_rate_) * 120, in.boiler, expect);
+    const float boiler_for_ff = boiler_cold ? expect : predicted;
+    const bool have_ff = !std::isnan(in.boiler) && !std::isnan(in.ret) && boiler_for_ff - in.ret > 3;
+    float ff = have_ff ? (sp - in.ret) / (boiler_for_ff - in.ret) : opening_;
+    ff = std::clamp(ff, 0.0f, 1.0f);
 
     const float err = sp - in.mixed;  // positive: too cold, open towards hot
     const float kp = cfg.kp / 100.0f;
-    float out = ff + kp * (err + integral_ / cfg.ti);
+    // No proportional push while waiting for the boiler (the mix is cold because the boiler is).
+    float out = boiler_cold ? ff : ff + kp * (err + integral_ / cfg.ti);
 
-    // Integrate only when it helps (anti-windup).
+    // Integrate only when it helps (anti-windup), and not towards hot while the boiler is warming up.
     const bool pinned_hot = out >= 1 && err > 0, pinned_cold = out <= 0 && err < 0;
-    if (!boiler_cold && !pinned_hot && !pinned_cold && running_) {
+    if (!boiler_cold && !pinned_hot && !pinned_cold && running_ && !(boiler_rising && err > 0)) {
       integral_ += err * in.dt;
       // The trim may move the valve at most +/-30 % from the blend formula.
       const float lim = 0.3f * cfg.ti / std::max(kp, 1e-4f);
       integral_ = std::clamp(integral_, -lim, lim);
       out = ff + kp * (err + integral_ / cfg.ti);
     }
+    // While the boiler is warming up, the trim may close the valve but not open it past the blend.
+    if (boiler_rising) out = std::min(out, ff);
     out = std::clamp(out, 0.0f, 1.0f);
-    if (running_) out = std::clamp(out, opening_ - cfg.max_step, opening_ + cfg.max_step);
+    // Opening is rate-limited; closing isn't once the mix is more than 2 °C over the setpoint, so a
+    // sudden rush of hot water is cut back at once.
+    if (running_) {
+      const float max_close = err < -2 ? 1.0f : cfg.max_step;
+      out = std::clamp(out, opening_ - max_close, opening_ + cfg.max_step);
+    }
     opening_ = out;
     running_ = true;
 
@@ -133,6 +155,7 @@ class Controller {
   float opening_ = 0;
   float integral_ = 0;  // °C·s
   float missing_s_ = 0;
+  float last_boiler_ = NAN, boiler_rate_ = 0;  // °C/s, smoothed
   bool over_temp_ = false;
   bool running_ = false;
   Status status_ = Status::OFF;
@@ -320,6 +343,10 @@ class Positioner {
   void request_calibration() { mode_ = PosMode::CAL_HOME; cal_failed_ = false; first_exit_seen_ = false; }
   void lost() { tr_.forget(); if (mode_ == PosMode::READY) mode_ = PosMode::IDLE; }
 
+  // Shaft positions at the ends: after driving into an end the valve trails the shaft by half the play.
+  static float cold_shaft_x(const PosConfig &c) { return c.cold_x - c.play_x / 2; }
+  static float hot_shaft_x(const PosConfig &c) { return c.cold_x + c.stroke_x + c.play_x / 2; }
+
   float opening(const PosConfig &c) const {
     if (c.stroke_x <= 0) return NAN;
     float valve_x = tr_.x() - last_dir_ * c.play_x / 2;
@@ -370,8 +397,8 @@ class Positioner {
     if (std::fabs(target - now) < c.deadband) return false;
     // Targets at the ends: drive into the end (re-syncs at the hot end, pushes the cold end shut).
     const int dir = target > now ? 1 : -1;
-    if (target <= 0.001f) { *m = {-1, 0, c.max_run_s, true}; return true; }
-    if (target >= 0.999f) { *m = {+1, 0, c.max_run_s, true}; return true; }
+    if (target <= 0.001f) { *m = {-1, 0, c.home_s, true}; return true; }
+    if (target >= 0.999f) { *m = {+1, 0, c.home_s, true}; return true; }
     // Shaft target: allow for the play when this move's direction differs from the last one.
     float tx = c.cold_x + target * c.stroke_x + dir * c.play_x / 2;
     *m = {dir, tx, c.max_run_s, false};
@@ -413,12 +440,15 @@ class Positioner {
       }
       case PosMode::CAL_RETURN:
       case PosMode::HOMING:
-        tr_.set(c->cold_x);
+        tr_.set(cold_shaft_x(*c));
         last_dir_ = -1;
         mode_ = PosMode::READY;
         return;
       default: break;
     }
+    // A run to an end (timed, or stopped on a stall) is now at that end: the sensor may not be able to
+    // see it (cold end in the gap; short pushes at the hot end never leave the gap), so reset there.
+    if (m.to_end && c->stroke_x > 0) tr_.set(m.dir > 0 ? hot_shaft_x(*c) : cold_shaft_x(*c));
   }
   // Call after every sample during calibration: notes where the reading first leaves the gap.
   void watch_calibration() {

@@ -306,6 +306,12 @@ replaced, so all 10 circuits should flow):**
      does; homing must also allow for the play (it reports 8.4 % at the cold end).
 - At the hot stop the valve's own scale reads about 80 %.
 - Test stopped: pump, valves and Mixer auto off.
+- **Fixes (v0.4):** while the boiler is cold or warming, the blend uses a predicted boiler temperature
+  (current + 2 min of its rate of rise, capped at setpoint + 20 °C) instead of the current one; while
+  it's rising faster than 2 °C/min the trim may close but not open past the blend, and doesn't
+  integrate towards hot; closing is no longer rate-limited when the mix is > 2 °C over the setpoint;
+  a run to an end resets the position to that end (allowing for the play), and homing allows for the
+  play. Simulated with a cold boiler and with today's hot one: peak mix 41–43 °C (was 48–50).
 
 **Commissioning (servo on the valve, Mixer auto off):**
 
