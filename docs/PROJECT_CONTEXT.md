@@ -362,6 +362,25 @@ visible under load.
   hot and cold boiler): mix within ~0.6 °C, peak ~42.5 °C, and a deliberately lost turn is
   corrected by the zone check within seconds.
 
+**Heated test with the cam (7 Nov, 21:34–22:12), and the valve curve:**
+
+- Cold boiler (high thermal mass, slow): the valve waited at ~45–55 %, the mix rose slowly with the
+  boiler and settled at 40 °C with the valve ~38–41 %. When the boiler passed 42 °C the blend
+  switched from "boiler will reach 60 °C" to a rate-based prediction (~46 °C) and jumped up, opening
+  the valve while the mix was already over the setpoint (peak 44.7 °C, no trip); the trim then
+  brought it back to ~41.8 °C. Fix: no jump at that hand-over; and while waiting, still close if the
+  mix goes over the setpoint (it ignored the mix then).
+- Cam inputs glitch at idle (all four, or DI5+DI6 together, for ~0.4 s): wiring (rushed, to be
+  tidied). Planned: act on a cam change only once it has held for two readings.
+- **Valve curve** (`docs/valve_curve_2026-11-07.png`): stepped 0→25 % (75 s per step, Mixer auto
+  off) until the mix passed 45.5 °C at the start of the 30 % step (boiler had reached ~65 °C; the
+  board's cut-out fired at 45.2 °C). Boiler-water share: ~17 % at 5–10 %, 20 % at 15 %, 30 % at
+  21 %, 44 % at 27 %; readings during the automatic run (moving cold) give ~71 % at 32 %, ~85 % at
+  35 %, ~97–100 % at 38–45 %. So in the switch-to-switch frame the valve does nearly all its mixing
+  between ~10 % and ~40 % and is effectively fully hot above that, which the linear blend formula
+  gets badly wrong. Next: put this curve into the estimate (invert it), lower the gain for the
+  steep part, and consider narrowing the working range.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
