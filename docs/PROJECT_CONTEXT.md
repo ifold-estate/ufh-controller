@@ -287,6 +287,26 @@ holds the mix within ~1 °C, and makes ~40 moves/hour when steady.
 - To do: make calibration's cold-end estimate reliable (or keep setting it by eye), then test Mixer
   auto with heat.
 
+**First heated test with Mixer auto (7 Nov, setpoint 40 °C; the failed zone solenoid had been
+replaced, so all 10 circuits should flow):**
+
+- Sequence worked: valves one a minute, pump (mixer homed, then "Waiting", opening towards hot), CFH.
+- The boiler was already firing for the radiators, so the boiler flow went 18 → 33 °C in the first
+  minute and ~50 °C in the second. With the valve fully open, the mix overshot to **~48.8 °C**: the
+  board's cut-out fired (status Over-temp, valve driven to cold) and the script's 47 °C backup cut
+  CFH. The over-temp latch cleared once the mix fell below 40 °C.
+- **Faults found:**
+  1. While "Waiting" the valve opened fully: pointless while the boiler is cold, risky when heat
+     arrives suddenly. Should hold the opening a typical boiler temperature would need (~50 %).
+  2. Opening changes were limited to 5 % per 5 s: far too slow for a boiler rising ~30 °C/min.
+  3. Position at the ends: short pushes into the hot end never gave the tracker enough moving
+     readings to leave the gap, so it stuck at the gap edge (84 %) while the valve was fully open, and
+     kept pushing (slight hunting). After the over-temp drive to cold the estimate was wrong too
+     (reported 84 % with the mix at 26 °C). Timed runs to an end must reset the position, as homing
+     does; homing must also allow for the play (it reports 8.4 % at the cold end).
+- At the hot stop the valve's own scale reads about 80 %.
+- Test stopped: pump, valves and Mixer auto off.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
