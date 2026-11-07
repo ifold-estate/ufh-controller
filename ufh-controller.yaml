@@ -172,7 +172,7 @@ switch:
           // Start the controller from where the valve actually is.
           float span = id(mixer_hot_pos).state - id(mixer_cold_pos).state;
           if (id(mixer_servo).is_online() && std::fabs(span) > 1)
-            id(mixer_ctl).set_opening((id(mixer_servo).last_position() - id(mixer_cold_pos).state) / span);
+            mixer_control::instance().set_opening((id(mixer_servo).last_position() - id(mixer_cold_pos).state) / span);
 
 # ---------------------------------------------------------------- Digital inputs (opto-isolated)
 binary_sensor:
@@ -414,7 +414,7 @@ display:
       for (int i = 0; i < 4; i++) st.room_calling[i] = stats[i]->state;
       // Relays are still switched by hand; the mixer may be automatic.
       st.mode = id(mixer_auto).state ? "AUTO" : "MANUAL";
-      auto cs = id(mixer_ctl).status();
+      auto cs = mixer_control::instance().status();
       if (cs != mixer_control::Status::OFF) st.status = mixer_control::status_text(cs);
       else if (!id(mixer_servo).is_online()) st.status = "Mixer offline";
       else if (st.boiler_on) st.status = "Heating";
@@ -453,7 +453,7 @@ interval:
           cfg.limit = id(mixed_limit).state;
           cfg.kp = id(mixer_kp).state;
           cfg.ti = id(mixer_ti).state;
-          auto &c = id(mixer_ctl);
+          auto &c = mixer_control::instance();
           bool drive = c.update(in, cfg);
 
           // Over-temperature (or no mixed reading for 30 s): CFH off, and kept off until it clears.
@@ -476,10 +476,6 @@ interval:
             id(mixer_opening).publish_state(pct);
           const char *st = mixer_control::status_text(c.status());
           if (id(heating_status).state != st) id(heating_status).publish_state(st);
-
-globals:
-  - id: mixer_ctl
-    type: mixer_control::Controller
 
 text_sensor:
   - platform: template

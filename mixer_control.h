@@ -138,4 +138,10 @@ class Controller {
   Status status_ = Status::OFF;
 };
 
+// The one controller on the device (ESPHome globals are declared before includes, so it can't be one).
+inline Controller &instance() {
+  static Controller c;
+  return c;
+}
+
 }  // namespace mixer_control
