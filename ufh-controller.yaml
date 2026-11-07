@@ -20,6 +20,7 @@ esphome:
   includes:
     - ufh_screen.h      # LCD heat-flow screen (preview it with tools/screen_preview/render.py)
     - mixer_control.h   # mixed-flow control and over-temperature cut-out (test: tools/mixer_sim)
+    - cam_gpio.h        # raw cam switch levels (DI5-8)
   on_boot:
     priority: -100
     then:
@@ -31,6 +32,16 @@ esphome:
             const float before = tr.x();
             tr.sample(raw, dir, dt, driving);
             pz.watch_calibration();
+            // Cam switches read directly at every servo reading: log each raw change with the position.
+            static uint8_t cam_last = 0xFF;
+            const uint8_t cam = cam_gpio::read();
+            if (cam != cam_last) {
+              if (cam_last != 0xFF)
+                ESP_LOGI("cam", "raw DI5-8 %d%d%d%d -> %d%d%d%d at raw %d x %.0f%s dir %+d", cam_last & 1, cam_last >> 1 & 1,
+                         cam_last >> 2 & 1, cam_last >> 3 & 1, cam & 1, cam >> 1 & 1, cam >> 2 & 1, cam >> 3 & 1, raw, tr.x(),
+                         tr.in_gap() ? " (gap)" : "", dir);
+              cam_last = cam;
+            }
             // Movement the servo didn't cause (idle polls, dir 0): log it, as evidence of the valve
             // being pushed by the flow or turned by hand. The controller then drives it back.
             static float drift = 0;
