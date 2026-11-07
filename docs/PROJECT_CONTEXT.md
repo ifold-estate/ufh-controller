@@ -233,6 +233,31 @@ wiki hints at ±7 turns), and the slowest drive power that still turns the valve
 switches (multi-lobe cam) can go on DI5–8: input changes are logged next to the run logs, which will
 show the cam pattern; then wire them into `set_end_check` for homing without stalling.
 
+**Bench results (7 Nov 2026, servo on the valve, 8.0 V supply, 30 % drive):**
+
+- Motor mode set and read back (limits 0 / 0). The first attempts reported failure: an EEPROM write
+  wasn't acknowledged within 20 ms; the mode change now waits 100 ms, retries and reads back.
+- Positive drive turns the valve towards **hot** (Mixer reverse off).
+- **Current (reg 69) always reads 0** on this SC15, and **load just echoes the commanded drive**, so
+  neither can detect a stall.
+- **Position**: the potentiometer covers ~210° (0–1023); for the other ~150° the reading sticks near
+  0 or 1019 or gives meaningless values. Towards hot the reading counts **down**; on leaving the gap
+  it reappears at the other end (it wrapped 0 → gap → 1019 after one turn), so **whole turns can be
+  counted** in software. Speed (reg 58) is real inside the window.
+- **Stroke**: cold end → hot end ≈ 8 s of drive at 30 % (8 × 1 s jogs, the first partly spent on
+  play and the gap), ≈ 1⅓ servo turns (~430°), so the gearbox is nearer 5:1 or the valve turns
+  more than 90°. Each 1 s jog coasts ~10–18° after stopping.
+- **Ends**: the hot end falls inside the sensor window (stopped near 677 on the second pass, speed
+  falling to −100 as it arrived), so a speed-based stall is visible there. The cold end falls in or
+  near the gap (a stalled reading of 811 was not a real position), so it can't be seen: the cold end
+  needs a limit switch.
+- **Friction** varies with angle, with stiction near the middle; free speed ~450–500 steps/s,
+  ~150–300 in the stiff region. The lever has some play.
+
+Next design step (not yet done): absolute position from the sensor with turn counting (run time only
+across the gap), ends from the cam limit switches (DI5–8), a breakaway kick plus lower drive power for
+fine moves.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
