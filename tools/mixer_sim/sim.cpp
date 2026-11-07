@@ -93,7 +93,7 @@ Result run(float kp, float ti, int valve_curve, float play_deg, bool print) {
         else if (ex == COAST && t_coast >= 0.6f) {
           ex = IDLE;
           // stalled = stopped early while driving into an end
-          pz.done(mv, stopped && pz.stalled_now(), sv.raw(), &pc);
+          pz.done(mv, stopped && pz.stopped_on_stall(), sv.raw(), &pc);
           if (pz.take_calibrated()) {
             t_cal_done = t;
             if (print) printf("   calibrated at %.0f s: cold_x %.0f stroke_x %.0f (true stroke %.0f)\n", t, pc.cold_x,

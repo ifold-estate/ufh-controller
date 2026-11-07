@@ -629,7 +629,7 @@ interval:
             if (r.failed) {
               pz.lost();
             } else {
-              pz.done(mv, r.stopped && pz.stalled_now(), sv->last_position(), &pc);
+              pz.done(mv, r.stopped && pz.stopped_on_stall(), sv->last_position(), &pc);
               if (pz.take_calibrated()) {
                 ESP_LOGI("mixer", "Calibrated: cold end %.0f, stroke %.0f counts", pc.cold_x, pc.stroke_x);
                 auto c1 = id(mixer_cold_x).make_call(); c1.set_value(pc.cold_x); c1.perform();

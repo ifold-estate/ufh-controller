@@ -331,6 +331,7 @@ class Positioner {
   bool next(float target, bool move_valve, const PosConfig &c, Move *m) {
     if (!next_(target, move_valve, c, m)) return false;
     polls_ = 0;
+    stop_stall_ = false;
     tr_.reset_still();
     return true;
   }
@@ -339,11 +340,16 @@ class Positioner {
   // spin-up (4 polls, 0.4 s).
   bool should_stop(const Move &m, const PosConfig &c) {
     polls_++;
-    if (polls_ >= 4 && tr_.stalled()) return true;  // at an end (or jammed)
+    if (polls_ >= 4 && tr_.stalled()) {  // at an end (or jammed)
+      stop_stall_ = true;
+      return true;
+    }
     if (m.to_end || !tr_.known()) return false;
     return m.dir > 0 ? tr_.x() >= m.target_x - c.coast_x : tr_.x() <= m.target_x + c.coast_x;
   }
-  bool stalled_now() const { return polls_ >= 4 && tr_.stalled(); }
+  // Whether the last move was stopped by a stall (decided when it stopped, not after the coast: the
+  // shaft springs back a little once the drive is off).
+  bool stopped_on_stall() const { return stop_stall_; }
 
  protected:
   bool next_(float target, bool move_valve, const PosConfig &c, Move *m) {
@@ -432,6 +438,7 @@ class Positioner {
 
   Tracker tr_;
   int last_dir_ = -1, exits_at_home_ = 0, polls_ = 0;
+  bool stop_stall_ = false;
   float x_at_home_ = 0, first_exit_x_ = 0, first_exit_travel_ = 0;
   bool cal_failed_ = false, calibrated_ = false, cold_in_gap_ = false, first_exit_seen_ = false;
   PosMode mode_ = PosMode::IDLE;
