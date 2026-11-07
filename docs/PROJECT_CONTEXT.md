@@ -408,6 +408,17 @@ upstream delay, boiler thermal mass): band 35–42 °C gives 1.2 CFH cycles/h (~
 moves/h, mix 30–43 °C, never over 45 °C, and 98 % of the heat of fine control (which needs ~90
 moves/h). Wider/lower bands deliver less heat. Not yet in the firmware.
 
+**Boiler-flow cap (simulated 7 Nov, `docs/band_control_cap_sim.png`):** within the heating phase, also
+drop CFH when the boiler flow reaches a cap, restarting some degrees below it; the valve assumes
+the boiler reaches cap + 8 °C or its actual temperature if higher (radiators/hot water may still
+drive it to 60–70 °C). The boiler keeps heating ~2 min after CFH drops, so the peak is ~cap + 7 °C.
+Results (band 35–42 °C, 8 h): no cap 48 min cycles, boiler peak 68 / mean 50 °C, heat 195;
+cap 50 / restart 5 below: 19 min cycles, peak 57 / mean 49, heat 190; cap 50 / 10: 27 min, mean 46,
+heat 179; cap 45 / 10: 30 min, peak 53 / mean 42.5, heat 184, ~6 servo moves/h. So a cap lowers the
+peaks (and with a wide restart gap the mean), at the cost of shorter CFH cycles and a few % less heat
+per hour. A lower flow setting on the boiler itself, if it has one, would do the same without the
+cycling.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
