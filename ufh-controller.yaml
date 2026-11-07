@@ -183,6 +183,7 @@ switch:
           // it again by homing to cold, and start the controller from there.
           mixer_control::positioner().request_home();
           mixer_control::instance().set_opening(0);
+          mixer_control::manual_target() = NAN;
   # Direction: on if positive drive turns the valve towards cold. Find it with the jog buttons.
   - platform: template
     id: mixer_reverse
@@ -362,6 +363,20 @@ number:
     restore_value: true
     mode: box
     entity_category: config
+  # With Mixer auto off, send the valve to this opening (for commissioning and manual running).
+  - platform: template
+    id: mixer_manual
+    name: "Mixer manual opening"
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 1
+    initial_value: 0
+    optimistic: true
+    restore_value: false
+    mode: box
+    set_action:
+      - lambda: 'mixer_control::manual_target() = x / 100.0f;'
   - platform: template
     id: mixer_kick
     name: "Mixer kick power"    # first 0.2 s of every move, to break the valve's stiction
@@ -642,9 +657,11 @@ interval:
             if (sv->is_running()) sv->stop_run();
             pz.lost();
           } else if (!moving && !sv->is_running()) {
-            // Control moves only in auto (over-temp drives the target to cold).
-            const bool control = automatic && (c.over_temp() || pump_on);
-            if (pz.next(c.opening(), control, pc, &mv)) {
+            // Control moves in auto (over-temp drives the target to cold); manual target otherwise.
+            const bool manual = !automatic && !std::isnan(mixer_control::manual_target());
+            const bool control = (automatic && (c.over_temp() || pump_on)) || manual;
+            const float target = automatic ? c.opening() : mixer_control::manual_target();
+            if (pz.next(target, control, pc, &mv)) {
               const int power = int(id(mixer_power).state * 10) * (id(mixer_reverse).state ? -1 : 1);
               const int kick = int(id(mixer_kick).state * 10) * (id(mixer_reverse).state ? -1 : 1);
               mixer_control::move_active() = true;

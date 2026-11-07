@@ -467,5 +467,10 @@ inline bool &move_active() {
   static bool a = false;
   return a;
 }
+// Manual target opening (0..1) used while auto is off; NAN = none (the valve stays put).
+inline float &manual_target() {
+  static float t = NAN;
+  return t;
+}
 
 }  // namespace mixer_control
