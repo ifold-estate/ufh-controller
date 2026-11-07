@@ -69,6 +69,10 @@ Result run(float kp, float ti, int valve_curve, float play_deg, bool print, floa
   cfg.setpoint = 40;
   cfg.kp = kp;
   cfg.ti = ti;
+  // valve_curve: 0 linear, 1 S-curve (controller linear); 2 measured curve (controller uses it);
+  // 3 valve 15 % steeper than measured (controller uses the measured curve); 4 measured valve but
+  // the controller assumes linear (as on 7 Nov).
+  cfg.valve_curve = valve_curve == 2 || valve_curve == 3;
   Controller c;
   Positioner pz;
   PosConfig pc;
@@ -97,7 +101,7 @@ Result run(float kp, float ti, int valve_curve, float play_deg, bool print, floa
   float t_cal_done = -1;
   for (float t = 0; t < t_end; t += dt) {
     float duty = 0;
-    if (ex == DRIVE) duty = mv.dir * (t_run < 0.2f ? kick_pct : duty_pct);
+    if (ex == DRIVE) duty = mv.dir * (t_run < pc.kick_s ? kick_pct : duty_pct);
     sv.step(duty, dt);
     if (ex != IDLE) {
       t_poll += dt;
@@ -130,7 +134,10 @@ Result run(float kp, float ti, int valve_curve, float play_deg, bool print, floa
     if (t >= 2000 && t < 2300) tb_target = 48;
     tb += (tb_target - tb) * dt / (t >= 2000 && t < 2300 ? 120 : boiler_tau);
     float u = std::clamp(sv.opening(), 0.0f, 1.0f);
-    float h = valve_curve ? u * u * (3 - 2 * u) : u;
+    float h = valve_curve == 0 ? u
+              : valve_curve == 1 ? u * u * (3 - 2 * u)
+              : valve_curve == 3 ? valve::share(std::min(1.0f, u * 1.15f))
+                                 : valve::share(u);
     h = p * h / (p * h + (1 - h) + 1e-6f);
     float mix = h * tb + (1 - h) * tr;
     ret_delay.push_back(mix);
@@ -238,13 +245,20 @@ void safety_checks() {
 int main(int argc, char **argv) {
   safety_checks();
   float kp = argc > 2 ? atof(argv[1]) : 2.5f, ti = argc > 2 ? atof(argv[2]) : 90;
-  printf("S-curve valve, 5 deg play, hot boiler, cam switches, a whole turn lost at 41 min:\n");
-  run(kp, ti, 1, 5, true, 60, true, true);
+  printf("Measured valve curve, 5 deg play, hot boiler, cam switches:\n");
+  run(kp, ti, 2, 5, true, 60, true, false);
   printf("\n case                     | cal  stroke err | max mix  overshoot  err(20-32min) | worst est. error  moves/hr\n");
-  for (bool cam_on : {true}) for (bool lose : {false, true}) for (float tau : {300.0f, 60.0f}) {
-    Result r = run(kp, ti, 1, 5, false, tau, cam_on, lose);
-    printf(" CAM %s %s S-curve, play 5 deg  |          |  %5.1f    %5.1f       %5.2f       |      %4.1f%%        %3.0f\n",
-           tau < 100 ? "hot " : "cold", lose ? "turn lost" : "         ", r.max_mix, r.overshoot, r.mae_late, r.track_err * 100,
+  const char *vnames[] = {"linear", "S-curve", "measured, ctl uses curve", "15% steeper, ctl uses curve",
+                          "measured, ctl assumes linear"};
+  for (int vc : {2, 3, 4}) for (float tau : {300.0f, 60.0f}) {
+    Result r = run(kp, ti, vc, 5, false, tau, true, false);
+    printf(" CAM %s %-28s |          |  %5.1f    %5.1f       %5.2f       |      %4.1f%%        %3.0f\n",
+           tau < 100 ? "hot " : "cold", vnames[vc], r.max_mix, r.overshoot, r.mae_late, r.track_err * 100, r.moves / 1.5f);
+  }
+  for (bool lose : {true}) for (float tau : {60.0f}) {
+    Result r = run(kp, ti, 2, 5, false, tau, true, lose);
+    printf(" CAM %s %-28s |          |  %5.1f    %5.1f       %5.2f       |      %4.1f%%        %3.0f\n",
+           tau < 100 ? "hot " : "cold", "measured + turn lost", r.max_mix, r.overshoot, r.mae_late, r.track_err * 100,
            r.moves / 1.5f);
   }
   for (float tau : {300.0f, 60.0f})

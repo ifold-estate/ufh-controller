@@ -22,12 +22,48 @@
 
 namespace mixer_control {
 
+// Measured valve characteristic (7 Nov 2026, docs/valve_curve_2026-11-07.png): share of boiler
+// water in the mix against opening (fraction of the travel between the cam end switches). Nearly all
+// the mixing happens between ~10 % and ~40 %; above that the valve passes almost only boiler water,
+// and even closed it lets ~12 % through. The controller works in terms of share and converts
+// through this curve, which also makes its corrections gentle where the valve is steep.
+namespace valve {
+struct Pt {
+  float opening, share;
+};
+constexpr Pt CURVE[] = {{0.00f, 0.12f}, {0.10f, 0.17f}, {0.15f, 0.20f}, {0.21f, 0.30f}, {0.27f, 0.44f},
+                        {0.32f, 0.71f}, {0.35f, 0.85f}, {0.38f, 0.97f}, {0.42f, 1.00f}, {1.00f, 1.00f}};
+constexpr int N = sizeof(CURVE) / sizeof(CURVE[0]);
+inline float share(float opening) {
+  if (opening <= CURVE[0].opening) return CURVE[0].share;
+  for (int i = 1; i < N; i++)
+    if (opening <= CURVE[i].opening) {
+      const float f = (opening - CURVE[i - 1].opening) / (CURVE[i].opening - CURVE[i - 1].opening);
+      return CURVE[i - 1].share + f * (CURVE[i].share - CURVE[i - 1].share);
+    }
+  return CURVE[N - 1].share;
+}
+// Smallest opening giving at least this share.
+inline float opening(float share) {
+  if (share <= CURVE[0].share) return CURVE[0].opening;
+  for (int i = 1; i < N; i++)
+    if (share <= CURVE[i].share) {
+      const float f = (share - CURVE[i - 1].share) / (CURVE[i].share - CURVE[i - 1].share);
+      return CURVE[i - 1].opening + f * (CURVE[i].opening - CURVE[i - 1].opening);
+    }
+  for (int i = 0; i < N; i++)
+    if (CURVE[i].share >= CURVE[N - 1].share) return CURVE[i].opening;
+  return 1;
+}
+}  // namespace valve
+
 struct Settings {
   float setpoint = 35;    // °C mixed flow
   float limit = 45;       // °C over-temperature cut-out
-  float kp = 1.0;         // % opening per °C error
+  float kp = 1.0;         // % boiler-water share per °C error
   float ti = 120;         // s integral time
-  float max_step = 0.05;  // max opening change per update (fraction)
+  float max_step = 0.05;  // max share change per update (fraction)
+  bool valve_curve = true;  // convert share -> opening through the measured curve (false: linear)
   float boiler_expect_rise = 20;  // °C over setpoint the boiler is assumed to reach while it warms
 };
 
@@ -78,7 +114,7 @@ class Controller {
     if (over_temp_) {
       integral_ = 0;
       running_ = false;
-      opening_ = 0;
+      opening_ = share_ = 0;
       status_ = Status::OVER_TEMP;
       return true;
     }
@@ -100,42 +136,44 @@ class Controller {
       boiler_rate_ = 0.6f * boiler_rate_ + 0.4f * (in.boiler - last_boiler_) / in.dt;
     last_boiler_ = in.boiler;
     const bool boiler_rising = boiler_rate_ > 2.0f / 60;  // > 2 °C/min
-    // While the boiler is still cold, blend for the boiler temperature it will soon deliver, not
-    // the current one: opening fully gains nothing while it's cold, and lets the first hot water
-    // straight through when it arrives (6 Nov/7 Nov tests: boiler 18 -> 50 °C in under 2 minutes).
-    // While it's still rising, blend for where it will be in a couple of minutes: blending for its
-    // current temperature would open the valve just before the rest of the heat arrives.
+    // Blend for the boiler temperature it will soon deliver, not the current one: while it's cold,
+    // assume it will reach setpoint + 20 °C (opening fully gains nothing, and lets the first hot water
+    // straight through); that assumption fades out smoothly between setpoint and setpoint + 10 °C
+    // (no jump at the hand-over), and while it's still rising use where it will be in 2 minutes.
     const float expect = std::max(in.boiler, sp + cfg.boiler_expect_rise);
     const float predicted = std::clamp(in.boiler + std::max(0.0f, boiler_rate_) * 120, in.boiler, expect);
-    const float boiler_for_ff = boiler_cold ? expect : predicted;
+    const float w = std::clamp((sp + 10 - in.boiler) / 10, 0.0f, 1.0f);
+    const float boiler_for_ff = std::max(predicted, in.boiler + (expect - in.boiler) * w);
     const bool have_ff = !std::isnan(in.boiler) && !std::isnan(in.ret) && boiler_for_ff - in.ret > 3;
-    float ff = have_ff ? (sp - in.ret) / (boiler_for_ff - in.ret) : opening_;
+    float ff = have_ff ? (sp - in.ret) / (boiler_for_ff - in.ret) : share_;
     ff = std::clamp(ff, 0.0f, 1.0f);
 
-    const float err = sp - in.mixed;  // positive: too cold, open towards hot
+    const float err = sp - in.mixed;  // positive: too cold, more boiler water
     const float kp = cfg.kp / 100.0f;
-    // No proportional push while waiting for the boiler (the mix is cold because the boiler is).
-    float out = boiler_cold ? ff : ff + kp * (err + integral_ / cfg.ti);
+    // While waiting for the boiler, only correct downwards (a cold mix is the boiler's fault, but a
+    // mix over the setpoint must still be cut back).
+    float out = boiler_cold ? ff + kp * std::min(err, 0.0f) : ff + kp * (err + integral_ / cfg.ti);
 
     // Integrate only when it helps (anti-windup), and not towards hot while the boiler is warming up.
     const bool pinned_hot = out >= 1 && err > 0, pinned_cold = out <= 0 && err < 0;
     if (!boiler_cold && !pinned_hot && !pinned_cold && running_ && !(boiler_rising && err > 0)) {
       integral_ += err * in.dt;
-      // The trim may move the valve at most +/-30 % from the blend formula.
+      // The trim may move the share at most +/-30 % from the blend formula.
       const float lim = 0.3f * cfg.ti / std::max(kp, 1e-4f);
       integral_ = std::clamp(integral_, -lim, lim);
       out = ff + kp * (err + integral_ / cfg.ti);
     }
-    // While the boiler is warming up, the trim may close the valve but not open it past the blend.
+    // While the boiler is warming up, the trim may reduce the share but not raise it past the blend.
     if (boiler_rising) out = std::min(out, ff);
     out = std::clamp(out, 0.0f, 1.0f);
-    // Opening is rate-limited; closing isn't once the mix is more than 2 °C over the setpoint, so a
-    // sudden rush of hot water is cut back at once.
+    // Raising the share is rate-limited; cutting it isn't once the mix is more than 2 °C over the
+    // setpoint, so a sudden rush of hot water is cut back at once.
     if (running_) {
-      const float max_close = err < -2 ? 1.0f : cfg.max_step;
-      out = std::clamp(out, opening_ - max_close, opening_ + cfg.max_step);
+      const float max_cut = err < -2 ? 1.0f : cfg.max_step;
+      out = std::clamp(out, share_ - max_cut, share_ + cfg.max_step);
     }
-    opening_ = out;
+    share_ = out;
+    opening_ = cfg.valve_curve ? valve::opening(share_) : share_;
     running_ = true;
 
     if (boiler_cold) status_ = Status::WAITING_BOILER;
@@ -149,10 +187,15 @@ class Controller {
   bool over_temp() const { return over_temp_; }
   Status status() const { return status_; }
   // Start from the valve's actual position (e.g. after switching to auto).
-  void set_opening(float o) { opening_ = std::clamp(o, 0.0f, 1.0f); }
+  void set_opening(float o, bool curve = true) {
+    opening_ = std::clamp(o, 0.0f, 1.0f);
+    share_ = curve ? valve::share(opening_) : opening_;
+  }
+  float share() const { return share_; }
 
  protected:
   float opening_ = 0;
+  float share_ = 0;     // boiler-water share asked for
   float integral_ = 0;  // °C·s
   float missing_s_ = 0;
   float last_boiler_ = NAN, boiler_rate_ = 0;  // °C/s, smoothed
@@ -373,6 +416,8 @@ struct PosConfig {
   float deadband = 0.03f; // of the stroke
   float home_s = 12;      // cold homing run time (s)
   float max_run_s = 6;    // longest single move
+  float kick_s = 0.2f;    // stiction-breaking kick at the start of each move (the caller drives it)
+  int settle_ticks = 30;  // calls to next() after a move during which reversing needs twice the deadband
 };
 
 enum class PosMode : uint8_t { IDLE, HOMING, CAL_HOME, CAL_MEASURE, CAL_RETURN, READY };
@@ -393,10 +438,21 @@ class Positioner {
   const char *cam(uint8_t state) {
     use_cam_ = true;
     const char *note = nullptr;
+    // A change counts only once it has held for two readings (wiring blips last one reading or so);
+    // the shaft's movement since the first sighting is kept when snapping to the edge.
+    if (cam_ != 0xFF && state != cam_) {
+      if (state != pending_) {
+        pending_ = state;
+        pending_x_ = tr_.x();
+        return nullptr;
+      }
+    }
+    pending_ = 0xFF;
     if (cam_ != 0xFF && state != cam_) {
       if (const cam::Edge *e = cam::edge(cam_, state)) {
-        const float err = tr_.known() ? tr_.x() - e->x : 0;
-        tr_.set(e->x);
+        const float moved = tr_.x() - pending_x_;
+        const float err = tr_.known() ? pending_x_ - e->x : 0;
+        tr_.set(e->x + moved);
         if (std::fabs(err) > 60) note = "cam edge";
         last_cam_err_ = err;
       } else {
@@ -445,7 +501,9 @@ class Positioner {
 
   // Next move towards `target` opening, or false. Call only while the servo is idle.
   bool next(float target, bool move_valve, const PosConfig &c, Move *m) {
+    if (idle_ticks_ < 1000000) idle_ticks_++;
     if (!next_(target, move_valve, c, m)) return false;
+    idle_ticks_ = 0;
     polls_ = 0;
     stop_stall_ = false;
     tr_.reset_still();
@@ -491,6 +549,11 @@ class Positioner {
     if (std::fabs(target - now) < c.deadband) return false;
     // Targets at the ends: drive into the end (re-syncs at the hot end, pushes the cold end shut).
     const int dir = target > now ? 1 : -1;
+    // Don't reverse straight back after a move unless clearly needed: the smallest move (kick plus
+    // coast) can be bigger than the deadband, which otherwise hunts between two positions.
+    // Only reversals towards hot are held back: closing (towards cold) is never delayed.
+    if (dir > 0 && last_dir_ < 0 && idle_ticks_ < c.settle_ticks && std::fabs(target - now) < 2 * c.deadband)
+      return false;
     if (target <= 0.001f) { *m = {-1, 0, c.home_s, true}; return true; }
     if (target >= 0.999f) { *m = {+1, 0, c.home_s, true}; return true; }
     // Shaft target: allow for the play when this move's direction differs from the last one.
@@ -562,8 +625,9 @@ class Positioner {
   void fail_cal_() { cal_failed_ = true; tr_.forget(); mode_ = PosMode::IDLE; }
 
   Tracker tr_;
-  int last_dir_ = -1, exits_at_home_ = 0, polls_ = 0;
-  uint8_t cam_ = 0xFF, cam_bad_ = 0xFF;
+  int last_dir_ = -1, exits_at_home_ = 0, polls_ = 0, idle_ticks_ = 1000000;
+  uint8_t cam_ = 0xFF, cam_bad_ = 0xFF, pending_ = 0xFF;
+  float pending_x_ = 0;
   bool use_cam_ = false, cam_coarse_ = false;
   float last_cam_err_ = 0;
   bool stop_stall_ = false;

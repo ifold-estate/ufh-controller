@@ -381,6 +381,23 @@ visible under load.
   gets badly wrong. Next: put this curve into the estimate (invert it), lower the gain for the
   steep part, and consider narrowing the working range.
 
+**v0.7 (branch `valve-curve`, not flashed):** control in terms of boiler-water share, converted to
+an opening through the measured curve; smooth warm-up hand-over (the "boiler will reach setpoint +
+20 °C" assumption fades out between setpoint and setpoint + 10 °C); while waiting, still cut back if
+the mix is over the setpoint; cam changes count only after two readings; after a move, reversing
+towards hot needs twice the deadband for 30 s (it hunted between two positions because the smallest
+move, kick plus coast, exceeds the deadband); kick time configurable. Simulated with the measured
+valve: mean error ~1 °C (vs ~13 °C assuming linear), but warm-up peaks still 50–57 °C and a valve
+15 % steeper than measured isn't controlled. The simulator's servo model (kick, coast, stiction) is
+a guess.
+
+**The real limit:** nearly all mixing happens in ~30 % of the travel (~600 counts); ±1 °C needs the
+valve placed to ~±10 counts, but the smallest servo move is ~50–130 counts. Likely cause: low valve
+authority (boiler side has far more pressure than the floor loop; 97 % boiler water at 38 % open).
+Options: (1) a regulating/lockshield valve on the mixer's hot inlet, partly closed, to spread the
+mixing over more travel (standard fix); (2) measure the servo's smallest reliable move on the bench
+(short pulses, with/without kick, different powers) and model it; low-power "creep" moves.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
