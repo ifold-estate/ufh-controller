@@ -342,6 +342,26 @@ to hold the lever on one side of whatever play remains (then set Mixer play to 0
 check the servo index (raw ~512 at ~1/3 open), redo the cold end / stroke / play settings, and
 re-run the position checks before heating. Decided: try without the limit switches for now.
 
+**Rework and cam switches (7 Nov evening):** Jon shimmed the slop out of the gearbox coupling (a few
+degrees remain in the valve's own shaft, after the cam) and wired the old actuator's four cam
+switches to DI5–8 (two NO, two NC). Drive train: servo → gearbox (~4.5:1) → output shaft, shimmed
+to the cam → cam doubles as the coupling to the valve lever → valve shaft. Some bracket flex is
+visible under load.
+
+- Read through the binary sensors, switch-ON changes arrived up to 1 s late (on a 1 s rhythm);
+  read directly from GPIO8–11 at every servo reading they repeat to ~10–25 counts. Cause of the
+  binary-sensor delay not yet found (DI1–4 thermostats use the same path; harmless there).
+- The four switches form a code that changes one bit at a time (DI5 DI6 DI7 DI8, going hot):
+  0101 (cold end) → 1101 at x≈65 → 1100 at 645 → 1110 at ~1025 (in the gap) → 1010 at ~1795 →
+  1011 at 1956 (hot end). Going cold the same edges come at 1885, 1757, 945, 535 and 0. DI5 off is
+  the cold end switch and DI8's last change the hot end switch; DI6/DI7 were auxiliaries.
+- **v0.6:** the positioner snaps to the exact position at every cam edge, checks the tracked
+  position against the cam zone (and starts from it after a restart), and uses the end switches
+  for the ends (homing stops at the cold end switch; no more pushing on the stops). The range is
+  now switch to switch: Mixer cold end 0, Mixer stroke 1956, Mixer play 0. Simulator (cam model,
+  hot and cold boiler): mix within ~0.6 °C, peak ~42.5 °C, and a deliberately lost turn is
+  corrected by the zone check within seconds.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.

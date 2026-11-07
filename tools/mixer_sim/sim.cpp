@@ -17,7 +17,7 @@ struct Result {
 // Servo + gearbox + valve, as measured on 7 Nov 2026 (angles in servo degrees).
 struct Servo {
   float th = 105;          // shaft angle; potentiometer window is 0..210 of each turn
-  float th_cold = -37, th_hot = 393;  // end stops (stroke 430°), valve at 1/3 when th = 105
+  float th_cold = -20, th_hot = 408;  // end stops, just beyond the cam end switches (x 0 and 1956)
   float play = 15;         // lever play (servo degrees)
   float valve_th = 105;    // valve side of the play
   float vel = 0;           // deg/s
@@ -32,6 +32,16 @@ struct Servo {
     return (rng >> 16) % 1024;   // anything in between
   }
   float opening() const { return (valve_th - th_cold) / (th_hot - th_cold); }
+  // Cam switches as measured: state from the true shaft position, changing at the "going hot" edge
+  // when moving hot and the "going cold" edge when moving cold.
+  uint8_t cam_state = 0b1010;
+  void update_cam() {
+    const float x = th * 1024 / 210;
+    for (const auto &e : cam::EDGES) {
+      const bool hot = cam::zone(e.to) && cam::zone(e.from) && cam::zone(e.to)->lo > cam::zone(e.from)->lo;
+      if (e.from == cam_state && ((hot && x >= e.x) || (!hot && x <= e.x))) { cam_state = e.to; return; }
+    }
+  }
   bool stiff() const { float o = (th - th_cold) / (th_hot - th_cold); return o > 0.35f && o < 0.65f; }
   // duty in %; returns true if pushing against an end stop
   bool step(float duty, float dt) {
@@ -45,6 +55,7 @@ struct Servo {
     if (nth <= th_cold) { nth = th_cold; vel = 0; at_end = duty < 0; }
     if (nth >= th_hot) { nth = th_hot; vel = 0; at_end = duty > 0; }
     th = nth;
+    update_cam();
     if (th > valve_th + play / 2) valve_th = th - play / 2;
     if (th < valve_th - play / 2) valve_th = th + play / 2;
     valve_th = std::clamp(valve_th, th_cold, th_hot);
@@ -53,7 +64,7 @@ struct Servo {
 };
 
 // One full scenario: calibrate, then control the mixed flow against the 6 Nov plant.
-Result run(float kp, float ti, int valve_curve, float play_deg, bool print, float boiler_tau = 300) {
+Result run(float kp, float ti, int valve_curve, float play_deg, bool print, float boiler_tau = 300, bool use_cam = false, bool inject_turn_loss = false) {
   Settings cfg;
   cfg.setpoint = 40;
   cfg.kp = kp;
@@ -64,7 +75,13 @@ Result run(float kp, float ti, int valve_curve, float play_deg, bool print, floa
   Servo sv;
   sv.play = play_deg;
   const float duty_pct = 30, kick_pct = 60;
-  pz.request_calibration();
+  if (use_cam) {
+    pc.cold_x = 0;
+    pc.stroke_x = 1956;  // switch to switch
+    pz.request_home();
+  } else {
+    pz.request_calibration();
+  }
   const float dt = 0.02f;
   float tb = 18, tr = 16, probe = 18, p = 1;
   std::deque<float> probe_delay(250, 18.0f), ret_delay(9000, 16.0f);
@@ -88,6 +105,7 @@ Result run(float kp, float ti, int valve_curve, float play_deg, bool print, floa
       if (t_poll >= 0.1f) {
         pz.tracker().sample(sv.raw(), mv.dir, t_poll, ex == DRIVE);
         pz.watch_calibration();
+        if (use_cam) pz.cam(sv.cam_state);
         t_poll = 0;
         if (ex == DRIVE && pz.should_stop(mv, pc)) { stopped = true; ex = COAST; t_coast = 0; }
         else if (ex == COAST && t_coast >= 0.6f) {
@@ -104,6 +122,8 @@ Result run(float kp, float ti, int valve_curve, float play_deg, bool print, floa
       if (ex == DRIVE && t_run >= mv.max_s) { stopped = false; ex = COAST; t_coast = 0; }
     }
     if (pz.known()) control_started = true;
+    // Fault injection: the tracker loses a whole turn (as in the 7 Nov retest).
+    if (use_cam && inject_turn_loss && std::fabs(t - 2500) < dt / 2) pz.tracker().set(pz.tracker().x() - TURN);
     // Plant: CFH once the valve is under control.
     float tb_target = control_started ? 62 : 18;
     if (t >= 1900) p = 0.75f;
@@ -154,8 +174,8 @@ Result run(float kp, float ti, int valve_curve, float play_deg, bool print, floa
   r.mae_late = n_late ? mae / n_late : NAN;
   r.max_mix = max_mix;
   r.track_err = track;
-  r.cal_ok = t_cal_done > 0;
-  r.cal_stroke_err = (pc.stroke_x - true_stroke) / true_stroke;
+  r.cal_ok = use_cam || t_cal_done > 0;
+  r.cal_stroke_err = use_cam ? 0 : (pc.stroke_x - true_stroke) / true_stroke;
   r.cal_cold_err = 0;
   r.moves = moves;
   return r;
@@ -218,9 +238,15 @@ void safety_checks() {
 int main(int argc, char **argv) {
   safety_checks();
   float kp = argc > 2 ? atof(argv[1]) : 2.5f, ti = argc > 2 ? atof(argv[2]) : 90;
-  printf("S-curve valve, 15 deg lever play, boiler already hot (as on 7 Nov):\n");
-  run(kp, ti, 1, 15, true, 60);
+  printf("S-curve valve, 5 deg play, hot boiler, cam switches, a whole turn lost at 41 min:\n");
+  run(kp, ti, 1, 5, true, 60, true, true);
   printf("\n case                     | cal  stroke err | max mix  overshoot  err(20-32min) | worst est. error  moves/hr\n");
+  for (bool cam_on : {true}) for (bool lose : {false, true}) for (float tau : {300.0f, 60.0f}) {
+    Result r = run(kp, ti, 1, 5, false, tau, cam_on, lose);
+    printf(" CAM %s %s S-curve, play 5 deg  |          |  %5.1f    %5.1f       %5.2f       |      %4.1f%%        %3.0f\n",
+           tau < 100 ? "hot " : "cold", lose ? "turn lost" : "         ", r.max_mix, r.overshoot, r.mae_late, r.track_err * 100,
+           r.moves / 1.5f);
+  }
   for (float tau : {300.0f, 60.0f})
   for (float play : {0.0f, 15.0f, 30.0f})
     for (int curve : {0, 1}) {

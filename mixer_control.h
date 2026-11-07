@@ -317,6 +317,45 @@ class Tracker {
   bool in_gap_ = true, known_ = false, provisional_ = false;
 };
 
+// The gearbox cam's four switches (DI5-DI8; bit 0 = DI5) form a code that changes one switch at a
+// time along the stroke, so they give an absolute zone at any moment, and an exact reference at every
+// change. Measured 7 Nov 2026 over three sweeps (repeatable to ~10-25 counts; changes going cold come
+// 35-110 counts before the same change going hot). DI5 off = cold end switch, DI8 on (after DI7) =
+// hot end switch, as in the original mains actuator; DI6 and DI7 were its auxiliaries.
+namespace cam {
+constexpr uint8_t COLD_END = 0b1010, HOT_END = 0b1101;  // DI8 DI7 DI6 DI5
+struct Zone {
+  uint8_t state;
+  float lo, hi;  // x range in which this state can be seen (either direction)
+};
+constexpr Zone ZONES[] = {
+    {0b1010, -1e9f, 65},  {0b1011, 0, 645},     {0b0011, 535, 1025},
+    {0b0111, 945, 1795},  {0b0101, 1757, 1956}, {0b1101, 1885, 1e9f},
+};
+struct Edge {
+  uint8_t from, to;
+  float x;  // shaft position where it changes
+};
+constexpr Edge EDGES[] = {
+    // going hot
+    {0b1010, 0b1011, 65}, {0b1011, 0b0011, 645}, {0b0011, 0b0111, 1025}, {0b0111, 0b0101, 1795},
+    {0b0101, 0b1101, 1956},
+    // going cold
+    {0b1101, 0b0101, 1885}, {0b0101, 0b0111, 1757}, {0b0111, 0b0011, 945}, {0b0011, 0b1011, 535},
+    {0b1011, 0b1010, 0},
+};
+inline const Zone *zone(uint8_t state) {
+  for (const auto &z : ZONES)
+    if (z.state == state) return &z;
+  return nullptr;
+}
+inline const Edge *edge(uint8_t from, uint8_t to) {
+  for (const auto &e : EDGES)
+    if (e.from == from && e.to == to) return &e;
+  return nullptr;
+}
+}  // namespace cam
+
 // Moves the valve to a target opening using the tracked shaft position.
 //   - Opening = (x - cold_x) / stroke_x, with the lever play allowed for: after moving hot the valve
 //     trails the shaft by play/2, after moving cold it leads by play/2.
@@ -348,6 +387,44 @@ class Positioner {
   };
 
   Tracker &tracker() { return tr_; }
+
+  // Feed the cam switch state with every servo reading. Returns a short note when it corrected the
+  // position (for logging), or nullptr.
+  const char *cam(uint8_t state) {
+    use_cam_ = true;
+    const char *note = nullptr;
+    if (cam_ != 0xFF && state != cam_) {
+      if (const cam::Edge *e = cam::edge(cam_, state)) {
+        const float err = tr_.known() ? tr_.x() - e->x : 0;
+        tr_.set(e->x);
+        if (std::fabs(err) > 60) note = "cam edge";
+        last_cam_err_ = err;
+      } else {
+        note = "cam code jumped";  // two switches at once: bounce or a fault; zone check still applies
+      }
+    }
+    cam_ = state;
+    // Zone check: never further than a margin outside the zone the switches show.
+    if (const cam::Zone *z = cam::zone(state)) {
+      const float margin = 60, x = tr_.x();
+      if (!tr_.known()) {
+        // Unknown (e.g. after a restart): start mid-zone, or at its finite edge.
+        float mid = (z->lo < -1e8f) ? z->hi - 100 : (z->hi > 1e8f) ? z->lo + 50 : (z->lo + z->hi) / 2;
+        tr_.set(mid);
+        cam_coarse_ = true;
+      } else if (x < z->lo - margin || x > z->hi + margin) {
+        last_cam_err_ = x < z->lo ? x - z->lo : x - z->hi;
+        tr_.set(std::clamp(x, z->lo, z->hi));
+        note = "cam zone";
+      }
+    } else if (state != cam_bad_) {
+      note = "cam code unknown";
+      cam_bad_ = state;
+    }
+    return note;
+  }
+  bool cam_end(int dir) const { return dir > 0 ? cam_ == cam::HOT_END : cam_ == cam::COLD_END; }
+  float last_cam_error() const { return last_cam_err_; }
   void request_home() {
     if (mode_ != PosMode::CAL_HOME && mode_ != PosMode::CAL_MEASURE && mode_ != PosMode::CAL_RETURN)
       mode_ = PosMode::HOMING;
@@ -379,6 +456,11 @@ class Positioner {
   // spin-up (4 polls, 0.4 s).
   bool should_stop(const Move &m, const PosConfig &c) {
     polls_++;
+    // With the cam switches, the ends are the end switches (as for the original actuator).
+    if (use_cam_ && cam_end(m.dir)) {
+      stop_stall_ = true;
+      return true;
+    }
     if (polls_ >= 4 && tr_.stalled()) {  // at an end (or jammed)
       stop_stall_ = true;
       return true;
@@ -452,7 +534,8 @@ class Positioner {
       }
       case PosMode::CAL_RETURN:
       case PosMode::HOMING:
-        tr_.set(cold_shaft_x(*c));
+        // With the cam, the end switch already set the position (and the coast is tracked).
+        if (!use_cam_ || !tr_.known()) tr_.set(cold_shaft_x(*c));
         last_dir_ = -1;
         mode_ = PosMode::READY;
         return;
@@ -460,7 +543,7 @@ class Positioner {
     }
     // A run to an end (timed, or stopped on a stall) is now at that end: the sensor may not be able to
     // see it (cold end in the gap; short pushes at the hot end never leave the gap), so reset there.
-    if (m.to_end && c->stroke_x > 0) tr_.set(m.dir > 0 ? hot_shaft_x(*c) : cold_shaft_x(*c));
+    if (m.to_end && c->stroke_x > 0 && !use_cam_) tr_.set(m.dir > 0 ? hot_shaft_x(*c) : cold_shaft_x(*c));
   }
   // Call after every sample during calibration: notes where the reading first leaves the gap.
   void watch_calibration() {
@@ -480,6 +563,9 @@ class Positioner {
 
   Tracker tr_;
   int last_dir_ = -1, exits_at_home_ = 0, polls_ = 0;
+  uint8_t cam_ = 0xFF, cam_bad_ = 0xFF;
+  bool use_cam_ = false, cam_coarse_ = false;
+  float last_cam_err_ = 0;
   bool stop_stall_ = false;
   float x_at_home_ = 0, first_exit_x_ = 0, first_exit_travel_ = 0;
   bool cal_failed_ = false, calibrated_ = false, cold_in_gap_ = false, first_exit_seen_ = false;
