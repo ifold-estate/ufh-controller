@@ -212,9 +212,21 @@ bool SCSServo::poll_motion_(int dir) {
 }
 
 void SCSServo::loop() {
-  if (!this->running_)
-    return;
   const uint32_t now = millis();
+  if (!this->running_) {
+    // Idle: keep watching the position (4 Hz) so movement the servo didn't cause is still followed.
+    if (this->sample_cb_ && this->online_ && now - this->last_poll_ >= 250) {
+      this->last_poll_ = now;
+      std::vector<uint8_t> d;
+      if (this->read_registers_(SCS_REG_PRESENT_POSITION, 2, &d)) {
+        const int pos = (int(d[0]) << 8) | d[1];
+        this->last_position_ = pos;
+        this->sample_cb_(pos, 0, this->last_sample_ ? (now - this->last_sample_) / 1000.0f : 0, false);
+        this->last_sample_ = now;
+      }
+    }
+    return;
+  }
   const int dir = this->run_duty_ > 0 ? 1 : -1;
   if (this->kicking_ && now - this->run_start_ >= this->kick_ms_) {
     this->kicking_ = false;

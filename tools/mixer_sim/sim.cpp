@@ -161,7 +161,7 @@ Result run(float kp, float ti, int valve_curve, float play_deg, bool print, floa
   return r;
 }
 
-// Over-temperature latch and missing-probe rules.
+// Over-temperature latch and missing-probe rules, and idle tracking.
 void safety_checks() {
   Settings cfg;  // limit 45
   Controller c;
@@ -189,6 +189,29 @@ void safety_checks() {
   assert(c.over_temp());                                             // back, but not 5 °C under
   step(38, false);
   assert(!c.over_temp());
+  // Tracker follows movement it didn't cause, through the gap (sticky edges, random middle).
+  {
+    Servo sv;
+    sv.th = 150;  // in window 0
+    Tracker tr;
+    tr.set(150 * 1024 / 210.0f);
+    for (int i = 0; i < 100; i++) {  // pushed hot ~2.5 deg per 0.25 s poll, right through the gap
+      sv.th += 2.5f;
+      tr.sample(sv.raw(), 0, 0.25f, false);
+    }
+    const float truth = sv.th * 1024 / 210;
+    assert(tr.known() && !tr.in_gap() && std::fabs(tr.x() - truth) < 30);
+    for (int i = 0; i < 100; i++) {  // and back again
+      sv.th -= 2.5f;
+      tr.sample(sv.raw(), 0, 0.25f, false);
+    }
+    assert(!tr.in_gap() && std::fabs(tr.x() - sv.th * 1024 / 210) < 30);
+    // Sitting still in the gap with random readings must not invent an exit.
+    sv.th = 290;
+    tr.set(290 * 1024 / 210.0f);
+    for (int i = 0; i < 4000; i++) tr.sample(sv.raw(), 0, 0.25f, false);
+    assert(tr.in_gap());
+  }
   printf("safety checks passed\n\n");
 }
 

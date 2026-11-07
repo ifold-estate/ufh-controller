@@ -313,6 +313,24 @@ replaced, so all 10 circuits should flow):**
   a run to an end resets the position to that end (allowing for the play), and homing allows for the
   play. Simulated with a cold boiler and with today's hot one: peak mix 41–43 °C (was 48–50).
 
+**Heated retest (7 Nov, v0.4):** homing now reads 0 %; while waiting the valve held at 54 % (matched
+by eye) instead of fully open, and the mix stayed below target while stored heat came through. Then
+the mix jumped 31 → 48.8 °C with the boiler flow steady at ~59 °C; the board's cut-out fired and
+the backup cut CFH. Jon saw the valve at the hot stop while the firmware said 54 %, then 0 %, then
+74 %; the servo's own reading (586) put the shaft about one turn further than the tracker thought.
+So the valve (and the servo shaft with it) moved while the servo wasn't driving, and the tracker,
+which only followed movement during runs, lost a turn. Whether the flow pushed it is unconfirmed.
+Test stopped (pump, valves, auto off).
+
+**v0.5:** the servo driver now reads the position 4×/s while idle, and the tracker follows movement
+it didn't cause, including through the gap (direction taken from the readings; only clear exits
+from the expected edge accepted). Such movement is logged as "Valve moved by itself", and the
+controller drives the valve back. Simulator: tracks an idle push through the gap and back within
+30 counts; 1000 s of random gap readings while still invent no exit.
+
+The cam limit switches (DI5–8) would give absolute reference points and remove the risk of losing
+a turn; Jon is reconsidering them despite the lack of space.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.

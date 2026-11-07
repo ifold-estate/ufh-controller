@@ -238,23 +238,35 @@ class Tracker {
     // the edge where the window starts (just under 1023 going hot, just over 0 going cold); otherwise
     // three. Readings stuck in the gap, or random ones, don't pass.
     const bool inside_now = raw >= 6 && raw <= 1016;
+    const bool inferred = dir == 0;
+    // Not driving (moved by something else, or coasting after a run): take the direction from the
+    // readings themselves.
+    if (dir == 0 && inside_now && pending_ >= 0) {
+      if (pending_ - raw >= 5 && pending_ - raw <= 150) dir = 1;
+      else if (raw - pending_ >= 5 && raw - pending_ <= 150) dir = -1;
+    }
     int step = 0;
     if (inside_now && dir != 0 && pending_ >= 0) step = dir > 0 ? pending_ - raw : raw - pending_;
     if (step >= 5 && step <= 150) {
       consistent_++;
     } else {
       consistent_ = 0;
-      first_ = (inside_now && dir != 0) ? raw : -1;  // a new run of readings may start here
+      first_ = inside_now ? raw : -1;  // a new run of readings may start here
     }
     pending_ = inside_now ? raw : -1;
+    if (dir == 0) return;  // nothing to go on yet
     const bool from_edge = dir > 0 ? first_ >= 940 : (first_ >= 0 && first_ <= 80);
+    // Moving on its own: there's no estimate to check against, so only accept a clear exit from the
+    // expected edge (3 readings in a row).
     const int need = provisional_ ? (from_edge ? 2 : 4) : (from_edge ? 2 : 3);
+    if (inferred && !from_edge) return;
     const int new_k = dir > 0 ? gap_k_ : gap_k_ - 1;
     const float exact = new_k * TURN + (WIN - raw);
     // Once the position is trusted, the estimate must also have got at least a quarter of the way
     // across the gap towards this side (it lags when friction changes, so no tighter than that).
     const float lo = gap_k_ * TURN - GAP, hi = gap_k_ * TURN;
-    const bool plausible = provisional_ || (dir > 0 ? x_ >= lo + 0.25f * GAP : x_ <= hi - 0.25f * GAP);
+    const bool plausible =
+        provisional_ || inferred || (dir > 0 ? x_ >= lo + 0.25f * GAP : x_ <= hi - 0.25f * GAP);
     if (consistent_ >= need && plausible) {
       saved_x_ = x_; saved_gap_k_ = gap_k_; saved_travel_ = gap_travel_; saved_provisional_ = provisional_;
       probation_ = 2;
