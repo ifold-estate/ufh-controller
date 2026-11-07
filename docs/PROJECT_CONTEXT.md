@@ -398,6 +398,16 @@ Options: (1) a regulating/lockshield valve on the mixer's hot inlet, partly clos
 mixing over more travel (standard fix); (2) measure the servo's smallest reliable move on the bench
 (short pulses, with/without kick, different powers) and model it; low-power "creep" moves.
 
+**Band control (Jon's proposal, simulated 7 Nov; `tools/mixer_sim/band_sim.py`,
+`docs/band_control_sim.png`):** don't regulate the mix to ±1 °C. HEAT: CFH on, valve set coarsely
+so the mix can't exceed the top of the band even with the boiler at its hottest (70 °C), re-set only
+when that opening drifts > 3 %. FREE-WHEEL (mix reaches the top): CFH off; the valve limits the mix
+to the top of the band for the boiler's actual, falling temperature, so the leftover heat is used.
+Back to HEAT at the bottom. 8 h with the floor warming (simple plant, measured valve curve, 2 min
+upstream delay, boiler thermal mass): band 35–42 °C gives 1.2 CFH cycles/h (~48 min), 9 servo
+moves/h, mix 30–43 °C, never over 45 °C, and 98 % of the heat of fine control (which needs ~90
+moves/h). Wider/lower bands deliver less heat. Not yet in the firmware.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
