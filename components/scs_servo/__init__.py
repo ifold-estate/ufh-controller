@@ -24,6 +24,7 @@ MULTI_CONF = True
 CONF_SERVO_ID = "servo_id"
 CONF_LOAD = "load"
 CONF_SPEED = "speed"
+CONF_CURRENT = "current"
 CONF_RESPONSE_TIMEOUT = "response_timeout"
 
 scs_servo_ns = cg.esphome_ns.namespace("scs_servo")
@@ -51,6 +52,11 @@ CONFIG_SCHEMA = (
                 accuracy_decimals=1,
                 state_class=STATE_CLASS_MEASUREMENT,
                 icon="mdi:weight",
+            ),
+            cv.Optional(CONF_CURRENT): sensor.sensor_schema(
+                accuracy_decimals=0,
+                state_class=STATE_CLASS_MEASUREMENT,
+                icon="mdi:current-dc",
             ),
             cv.Optional(CONF_VOLTAGE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_VOLT,
@@ -83,6 +89,7 @@ async def to_code(config):
         (CONF_LOAD, "set_load_sensor"),
         (CONF_VOLTAGE, "set_voltage_sensor"),
         (CONF_TEMPERATURE, "set_temperature_sensor"),
+        (CONF_CURRENT, "set_current_sensor"),
     ):
         if key in config:
             sens = await sensor.new_sensor(config[key])

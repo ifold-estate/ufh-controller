@@ -34,8 +34,10 @@ void SCSServo::dump_config() {
 }
 
 void SCSServo::update() {
+  if (this->running_)
+    return;  // loop() is polling at 100 ms during a run
   std::vector<uint8_t> d;
-  if (!this->read_registers_(SCS_REG_PRESENT_POSITION, 8, &d)) {
+  if (!this->read_registers_(SCS_REG_PRESENT_POSITION, 15, &d)) {
     if (this->online_) {
       ESP_LOGW(TAG, "Servo ID %u stopped responding", this->servo_id_);
     }
@@ -68,6 +70,10 @@ void SCSServo::update() {
     this->voltage_sensor_->publish_state(volt_raw / 10.0f);
   if (this->temperature_sensor_ != nullptr)
     this->temperature_sensor_->publish_state(temp_raw);
+  if (this->current_sensor_ != nullptr) {
+    uint16_t cur_raw = (uint16_t(d[13]) << 8) | d[14];
+    this->current_sensor_->publish_state((cur_raw & 0x8000) ? -int(cur_raw & 0x7FFF) : int(cur_raw));
+  }
 
 #ifdef USE_SWITCH
   std::vector<uint8_t> torque;
@@ -94,6 +100,104 @@ bool SCSServo::set_goal_position(uint16_t position) {
 bool SCSServo::set_torque(bool enable) {
   ESP_LOGD(TAG, "Torque %s", enable ? "ON" : "OFF");
   return this->write_registers_(SCS_REG_TORQUE_ENABLE, {uint8_t(enable ? 1 : 0)});
+}
+
+bool SCSServo::set_motor_mode(bool motor) {
+  ESP_LOGI(TAG, "Setting servo ID %u to %s mode", this->servo_id_, motor ? "motor (continuous)" : "position");
+  std::vector<uint8_t> limits = motor ? std::vector<uint8_t>{0, 0, 0, 0} : std::vector<uint8_t>{0, 0, 0x03, 0xFF};
+  bool ok = this->write_registers_(SCS_REG_LOCK, {0}) && this->write_registers_(SCS_REG_MIN_ANGLE_LIMIT, limits);
+  ok = this->write_registers_(SCS_REG_LOCK, {1}) && ok;
+  std::vector<uint8_t> check;
+  if (ok && this->read_registers_(SCS_REG_MIN_ANGLE_LIMIT, 4, &check))
+    ESP_LOGI(TAG, "Angle limits now %u / %u", (check[0] << 8) | check[1], (check[2] << 8) | check[3]);
+  else
+    ESP_LOGW(TAG, "Mode change failed");
+  return ok;
+}
+
+bool SCSServo::set_pwm(int duty) {
+  duty = std::max(-1000, std::min(1000, duty));
+  uint16_t v = duty < 0 ? uint16_t(-duty) | 0x0400 : uint16_t(duty);
+  return this->write_registers_(SCS_REG_GOAL_TIME, {uint8_t(v >> 8), uint8_t(v & 0xFF)});
+}
+
+bool SCSServo::start_run(int duty, uint32_t max_ms, int stall_current) {
+  if (this->running_)
+    this->stop_run();
+  if (!this->write_registers_(SCS_REG_TORQUE_ENABLE, {1}) || !this->set_pwm(duty)) {
+    ESP_LOGW(TAG, "Run start failed");
+    this->last_run_ = RunResult{};
+    this->last_run_.failed = true;
+    return false;
+  }
+  ESP_LOGD(TAG, "Run: duty %d for up to %u ms, stall current %d", duty, (unsigned) max_ms, stall_current);
+  this->running_ = true;
+  this->run_duty_ = duty;
+  this->run_start_ = this->last_poll_ = millis();
+  this->run_max_ms_ = max_ms;
+  this->run_stall_current_ = stall_current;
+  this->stall_count_ = this->poll_failures_ = 0;
+  this->run_ = RunResult{};
+  return true;
+}
+
+void SCSServo::stop_run() {
+  if (this->running_)
+    this->finish_run_(false, false);
+}
+
+void SCSServo::finish_run_(bool stalled, bool failed) {
+  // Stop even if the servo is answering badly: try twice.
+  if (!this->set_pwm(0))
+    this->set_pwm(0);
+  this->run_.ms = millis() - this->run_start_;
+  this->run_.stalled = stalled;
+  this->run_.failed = failed;
+  this->last_run_ = this->run_;
+  this->running_ = false;
+  ESP_LOGD(TAG, "Run done: %u ms%s%s, peak current %d", (unsigned) this->run_.ms, stalled ? ", stalled" : "",
+           failed ? ", FAILED" : "", this->run_.peak_current);
+}
+
+void SCSServo::loop() {
+  if (!this->running_)
+    return;
+  const uint32_t now = millis();
+  if (now - this->run_start_ >= this->run_max_ms_) {
+    this->finish_run_(false, false);
+    return;
+  }
+  if (now - this->last_poll_ < 100)
+    return;
+  this->last_poll_ = now;
+  std::vector<uint8_t> d;
+  if (!this->read_registers_(SCS_REG_PRESENT_POSITION, 15, &d)) {
+    if (++this->poll_failures_ >= 3)
+      this->finish_run_(false, true);
+    return;
+  }
+  this->poll_failures_ = 0;
+  uint16_t pos = (uint16_t(d[0]) << 8) | d[1];
+  uint16_t spd_raw = (uint16_t(d[2]) << 8) | d[3];
+  uint16_t cur_raw = (uint16_t(d[13]) << 8) | d[14];
+  int speed = (spd_raw & 0x8000) ? -int(spd_raw & 0x7FFF) : int(spd_raw);
+  int current = (cur_raw & 0x8000) ? -int(cur_raw & 0x7FFF) : int(cur_raw);
+  this->last_position_ = pos;
+  this->run_.peak_current = std::max(this->run_.peak_current, std::abs(current));
+  ESP_LOGD(TAG, "  t=%4u ms pos=%4u speed=%5d current=%4d", (unsigned) (now - this->run_start_), pos, speed,
+           current);
+  if (this->end_check_ && this->end_check_(this->run_duty_ > 0 ? 1 : -1)) {
+    ESP_LOGD(TAG, "  end of travel signalled");
+    this->finish_run_(true, false);
+    return;
+  }
+  // Ignore the start-up surge, then need two polls in a row over the threshold.
+  if (this->run_stall_current_ > 0 && now - this->run_start_ > 400 && std::abs(current) >= this->run_stall_current_) {
+    if (++this->stall_count_ >= 2)
+      this->finish_run_(true, false);
+  } else {
+    this->stall_count_ = 0;
+  }
 }
 
 bool SCSServo::read_registers_(uint8_t address, uint8_t length, std::vector<uint8_t> *data) {

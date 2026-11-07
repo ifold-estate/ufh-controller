@@ -201,31 +201,50 @@ flow guard on CFH. Pump on speed setting 2 (of 3).
 - **Manifold:** one zone valve (first of the 10 pipes) is broken, so that loop stayed cold; a spare is
   to be fitted. Several other return pipes stayed cold for a long time: long runs or poor balancing.
 
-## 5b. Mixer control (v0.2, from 6 Nov 2026)
+## 5b. Mixer control (v0.2, from 7 Nov 2026)
 
-`mixer_control.h`, run every 5 s from an `interval:` in `ufh-controller.yaml`:
+The servo drives the mixer through part of the old actuator's gearbox (~3:1–4:1, mixer arm ~90°), so
+it needs ~270–360° and runs in **continuous (motor) mode**, where it can't report an absolute
+position. Control is therefore in two layers, both in `mixer_control.h`:
 
-- Opening = feed-forward (setpoint − return) / (boiler − return) + PI trim on the mixed probe.
-  Integral frozen while saturated or while the boiler is below setpoint + 2 °C (anti-windup);
-  trim limited to ±30 %; opening changes at most 5 % per update.
-- Runs only with "Mixer auto" on (default off, restored from flash) and the floor pump (relay 2) on;
-  otherwise the valve holds still. Switching auto on starts from the servo's actual position.
-- Over-temperature cut-out, in auto **and** manual: mixed > "Mixed flow limit" (45 °C), or no mixed
-  reading for 30 s → CFH (relay 1) off, kept off until the mix is 5 °C under the limit; in auto the
-  valve also goes to cold. This replaces the guard script used in the 6 Nov test.
-- HA entities: Mixer auto, Mixed flow setpoint (35 °C default), Mixed flow limit, Mixer gain
-  (2.5 %/°C), Mixer integral time (90 s), Mixer cold/hot position (servo counts), Mixer opening,
-  Heating status. The mixed probe reads every 5 s.
-- `tools/mixer_sim/sim.cpp` checks the safety rules and runs the loop against a plant modelled on
-  the 6 Nov test (boiler warm-up, return warming, radiator pressure drop and boiler dip, linear and
-  S-curve valves). Kp 2.5 / Ti 90 holds within ~1.5 °C; oscillation starts near Kp 10.
-- **Commissioning, once the servo is on the valve:**
-  1. Leave Mixer auto off. Move the servo with "Mixer servo target" to find the full-cold end
-     (valve clockwise) and the full-hot end; watch "Mixer servo load" so it isn't forced past a stop.
-  2. Set "Mixer cold position" and "Mixer hot position" a little inside those ends. Either may be
-     the larger number; that sets the direction.
-  3. Set the setpoint, turn the pump on, then Mixer auto on; watch Mixer opening and the mixed
-     flow. If it hunts, lower the gain; if it is slow to settle, shorten the integral time.
+- **Controller** (every 5 s): target opening = feed-forward (setpoint − return) / (boiler − return) +
+  PI trim on the mixed probe, with anti-windup (frozen while saturated or while the boiler is below
+  setpoint + 2 °C), trim limited to ±30 %, target changes ≤ 5 % per update. Runs with "Mixer auto" on
+  (default off) and the floor pump on, once the valve position is known.
+- **Positioner** (every 1 s): estimates position from run time. Homes to cold (until an end is
+  detected, or 1.3 strokes) when auto turns on, at every pump start and whenever the position is lost
+  (jog, servo offline). Moves run for |target − position| × stroke time (max 5 s each), plus the
+  backlash time when reversing; a 3 % deadband (≈35 moves/hour in simulation) limits servo wear.
+  Reaching an end snaps the estimate; a target at an end overdrives once to re-sync.
+- **Servo driver** (`components/scs_servo`): motor mode = angle limits 0/0 (regs 9–12, EEPROM, unlock
+  via reg 48), drive = signed PWM in reg 44 (bit 10 = direction; FTServo `SCSCL::WritePWM`). Timed
+  runs poll every 100 ms, log position/speed/current at DEBUG, and stop on a stall (current ≥ "Mixer
+  stall current" for two polls after a 400 ms start-up) or on an end-of-travel hook for limit switches.
+  In motor mode the load register just echoes the drive, so it can't detect a stall.
+- **Over-temperature cut-out** (auto and manual): mixed > "Mixed flow limit" (45 °C) or no reading
+  for 30 s → CFH (relay 1) off until 5 °C under the limit; in auto the valve also goes to cold.
+- `tools/mixer_sim/sim.cpp`: safety checks, then controller + positioner against a plant modelled on
+  the 6 Nov test with lever play and stroke-time errors. Average error ~0.3–0.5 °C, warm-up peak
+  ~2.5 °C over setpoint, ~35 moves/hour.
+
+**Unknowns for the bench** (not documented by Feetech/Waveshare): which reading shows a stall in
+motor mode (current, reg 69, is the candidate), whether position still counts past one turn (the
+wiki hints at ±7 turns), and the slowest drive power that still turns the valve. The gearbox's limit
+switches (multi-lobe cam) can go on DI5–8: input changes are logged next to the run logs, which will
+show the cam pattern; then wire them into `set_end_check` for homing without stalling.
+
+**Commissioning (servo on the valve, Mixer auto off):**
+
+1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
+2. "Mixer jog hot" / "Mixer jog cold" run 1 s at "Mixer drive power" (30 %). Check the valve turns
+   the right way (flip "Mixer reverse" if not) and that the power is enough under load. Note the
+   current values in the log while running freely and when pushed against an end.
+3. Set "Mixer stall current" between those (or wire the limit switches), then "Mixer calibrate":
+   cold end → hot end (timed) → back to cold. "Mixer stroke time" is set from it.
+4. Measure the lever play (jog one way, then count the run time on reversal before the valve moves)
+   and set "Mixer backlash".
+5. Set the setpoint, start the pump, turn Mixer auto on: it homes, then controls. Watch Mixer opening
+   and the mixed flow; lower "Mixer gain" if it hunts, shorten "Mixer integral time" if it is slow.
 
 ## 6. Environment notes (for Claude sessions)
 
@@ -270,7 +289,8 @@ flow guard on CFH. Pump on speed setting 2 (of 3).
       gearbox (~3:1–4:1). The mixer arm turns ~90°, so the servo needs ~270–360°, beyond the SC15's
       ~210° position mode. Options: SC15 in continuous (wheel) mode with floating control and stall
       homing, or a multi-turn magnetic-encoder servo (e.g. ST3215) keeping absolute position. The
-      current `mixer_control.h` assumes absolute position.
+      current `mixer_control.h` assumes absolute position. **Decided:** SC15 continuous mode with
+      run-time positioning (see 5b); the cam limit switches can go on DI5–8.
 
 **Next work:**
 

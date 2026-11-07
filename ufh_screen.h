@@ -24,7 +24,7 @@ using esphome::display::TextAlign;
 
 struct State {
   float boiler = NAN, mixed = NAN, ret = NAN;  // °C, NAN when a probe has no reading
-  float mixer_pct = NAN;                        // NAN when the servo is offline
+  float mixer_pct = NAN;                        // NAN when the valve position isn't known
   bool boiler_on = false;                       // CFH + boiler pump (one relay)
   bool floor_pump_on = false;
   bool zone[6] = {};           // manifold valves: Playroom, Kitchen x2, Booth x2, Lounge
@@ -158,7 +158,7 @@ void draw(D &it, const State &s, F *f_pct, F *f_temp, F *f_label, F *f_small) {
   rounded_box(it, MX0, MY0, MX1, MY1, 12, Color(0xC8, 0xD0, 0xD8));
   rounded_box(it, MX0 + 4, MY0 + 4, MX1 - 4, MY1 - 4, 9, Color(0, 0, 0));
   if (std::isnan(s.mixer_pct))
-    it.print(MXC, 34, f_label, c_grey(), TextAlign::CENTER, "offline");
+    it.print(MXC, 34, f_pct, c_grey(), TextAlign::CENTER, "--%");
   else
     it.printf(MXC, 34, f_pct, Color(255, 255, 255), TextAlign::CENTER, "%.0f%%", s.mixer_pct);
 

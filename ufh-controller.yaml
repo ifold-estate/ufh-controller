@@ -9,10 +9,6 @@ substitutions:
   # (more margin, and plenty fast for this job). A new servo needs the same change.
   servo_baud: "115200"
   servo_id: "1"
-  # Initial servo positions for a fully cold and fully hot mixer. After mounting the servo, set the
-  # real ones from HA ("Mixer cold position" / "Mixer hot position"); they are kept in flash.
-  mixer_pos_cold: "0"
-  mixer_pos_hot: "1023"
 
 esphome:
   name: ${name}
@@ -169,10 +165,65 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     turn_on_action:
       - lambda: |-
-          // Start the controller from where the valve actually is.
-          float span = id(mixer_hot_pos).state - id(mixer_cold_pos).state;
-          if (id(mixer_servo).is_online() && std::fabs(span) > 1)
-            mixer_control::instance().set_opening((id(mixer_servo).last_position() - id(mixer_cold_pos).state) / span);
+          // The servo can't report the valve position (continuous mode through the gearbox), so find
+          // it again by homing to cold, and start the controller from there.
+          mixer_control::positioner().request_home();
+          mixer_control::instance().set_opening(0);
+  # Direction: on if positive drive turns the valve towards cold. Find it with the jog buttons.
+  - platform: template
+    id: mixer_reverse
+    name: "Mixer reverse"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+
+# ---------------------------------------------------------------- Mixer servo commissioning
+# The servo runs in continuous (motor) mode through the old actuator's gearbox: set it once with
+# "Servo motor mode". Jog to check direction (and watch the logs for current/position during runs);
+# then "Mixer calibrate" times a full cold-to-hot stroke, which needs a working end detection (stall
+# current or limit switches).
+button:
+  - platform: template
+    name: "Servo motor mode"
+    entity_category: config
+    on_press:
+      - lambda: 'id(mixer_servo).set_motor_mode(true);'
+  - platform: template
+    name: "Servo position mode"
+    entity_category: config
+    on_press:
+      - lambda: 'id(mixer_servo).set_motor_mode(false);'
+  - platform: template
+    name: "Mixer jog hot"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          mixer_control::positioner().lost();
+          int duty = int(id(mixer_power).state * 10) * (id(mixer_reverse).state ? -1 : 1);
+          id(mixer_servo).start_run(duty, 1000, int(id(mixer_stall_current).state));
+  - platform: template
+    name: "Mixer jog cold"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          mixer_control::positioner().lost();
+          int duty = -int(id(mixer_power).state * 10) * (id(mixer_reverse).state ? -1 : 1);
+          id(mixer_servo).start_run(duty, 1000, int(id(mixer_stall_current).state));
+  - platform: template
+    name: "Mixer calibrate"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          if (id(mixer_stall_current).state <= 0) {
+            ESP_LOGW("mixer", "Calibration needs end detection: set Mixer stall current first");
+            return;
+          }
+          mixer_control::positioner().request_calibration();
+  - platform: template
+    name: "Mixer home"
+    entity_category: config
+    on_press:
+      - lambda: 'mixer_control::positioner().request_home();'
 
 # ---------------------------------------------------------------- Digital inputs (opto-isolated)
 binary_sensor:
@@ -236,6 +287,8 @@ scs_servo:
       name: "Mixer servo voltage"
     temperature:
       name: "Mixer servo temperature"
+    current:
+      name: "Mixer servo current"
 
 number:
   - platform: scs_servo
@@ -290,23 +343,60 @@ number:
     mode: box
     entity_category: config
   - platform: template
-    id: mixer_cold_pos
-    name: "Mixer cold position"
-    min_value: 0
-    max_value: 1023
+    id: mixer_power
+    name: "Mixer drive power"
+    unit_of_measurement: "%"
+    min_value: 5
+    max_value: 100
     step: 1
-    initial_value: ${mixer_pos_cold}
+    initial_value: 30
     optimistic: true
     restore_value: true
     mode: box
     entity_category: config
   - platform: template
-    id: mixer_hot_pos
-    name: "Mixer hot position"
+    id: mixer_stroke
+    name: "Mixer stroke time"   # full cold->hot run at the drive power; set by Mixer calibrate
+    unit_of_measurement: "s"
     min_value: 0
-    max_value: 1023
+    max_value: 300
+    step: 0.1
+    initial_value: 0
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: mixer_backlash
+    name: "Mixer backlash"      # extra run time to take up the lever's play when reversing
+    unit_of_measurement: "s"
+    min_value: 0
+    max_value: 30
+    step: 0.1
+    initial_value: 0
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: mixer_deadband
+    name: "Mixer deadband"
+    unit_of_measurement: "%"
+    min_value: 0.5
+    max_value: 10
+    step: 0.5
+    initial_value: 3
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: mixer_stall_current
+    name: "Mixer stall current"  # raw servo units; 0 = off. Pick from the run logs.
+    min_value: 0
+    max_value: 2000
     step: 1
-    initial_value: ${mixer_pos_hot}
+    initial_value: 0
     optimistic: true
     restore_value: true
     mode: box
@@ -399,11 +489,8 @@ display:
       st.boiler = t(id(temp_boiler_flow));
       st.mixed = t(id(temp_mixed_flow));
       st.ret = t(id(temp_return));
-      float span = id(mixer_hot_pos).state - id(mixer_cold_pos).state;
-      if (id(mixer_servo).is_online() && std::fabs(span) > 1) {
-        float pct = 100.0f * (id(mixer_servo).last_position() - id(mixer_cold_pos).state) / span;
-        st.mixer_pct = std::max(0.0f, std::min(100.0f, pct));
-      }
+      auto &pz = mixer_control::positioner();
+      if (id(mixer_servo).is_online() && pz.known()) st.mixer_pct = pz.position() * 100;
       st.boiler_on = id(relay1).state;
       st.floor_pump_on = id(relay2).state;
       // Zone valves on relays 4-8; which dot is which room is provisional until the zones are mapped.
@@ -414,8 +501,8 @@ display:
       for (int i = 0; i < 4; i++) st.room_calling[i] = stats[i]->state;
       // Relays are still switched by hand; the mixer may be automatic.
       st.mode = id(mixer_auto).state ? "AUTO" : "MANUAL";
-      auto cs = mixer_control::instance().status();
-      if (cs != mixer_control::Status::OFF) st.status = mixer_control::status_text(cs);
+      const std::string &hs = id(heating_status).state;
+      if (!hs.empty() && hs != "Idle") st.status = hs.c_str();
       else if (!id(mixer_servo).is_online()) st.status = "Mixer offline";
       else if (st.boiler_on) st.status = "Heating";
       else if (st.floor_pump_on) st.status = "Circulating";
@@ -433,48 +520,102 @@ interval:
             id(lcd).update();
           }
 
-  # Mixed-flow control and over-temperature cut-out (mixer_control.h), every 5 s.
-  - interval: 5s
+  # Mixed-flow control and over-temperature cut-out (mixer_control.h). The positioner runs every
+  # second (servo moves are timed runs); the controller every 5 s.
+  - interval: 1s
     then:
       - lambda: |-
+          static uint8_t tick = 0;
           static uint32_t last_ms = millis();
-          static int last_goal = -1;
-          auto t = [](sensor::Sensor *s) { return s->has_state() ? s->state : NAN; };
-          mixer_control::Inputs in;
-          in.boiler = t(id(temp_boiler_flow));
-          in.mixed = t(id(temp_mixed_flow));
-          in.ret = t(id(temp_return));
-          in.pump_on = id(relay2).state;
-          in.automatic = id(mixer_auto).state;
-          in.dt = (millis() - last_ms) / 1000.0f;
-          last_ms = millis();
-          mixer_control::Settings cfg;
-          cfg.setpoint = id(mixed_setpoint).state;
-          cfg.limit = id(mixed_limit).state;
-          cfg.kp = id(mixer_kp).state;
-          cfg.ti = id(mixer_ti).state;
+          static bool moving = false, pump_was_on = false;
+          static mixer_control::Positioner::Move mv;
           auto &c = mixer_control::instance();
-          bool drive = c.update(in, cfg);
+          auto &pz = mixer_control::positioner();
+          auto &sv = id(mixer_servo);
+          const bool automatic = id(mixer_auto).state, pump_on = id(relay2).state;
 
-          // Over-temperature (or no mixed reading for 30 s): CFH off, and kept off until it clears.
-          if (c.over_temp() && id(relay1).state) {
-            ESP_LOGW("mixer", "Mixed flow %.1f °C over limit %.1f °C (or no reading): boiler CFH off",
-                     in.mixed, cfg.limit);
-            id(relay1).turn_off();
-          }
+          // --- Controller, every 5 s ---
+          if (++tick >= 5) {
+            tick = 0;
+            auto t = [](sensor::Sensor *s) { return s->has_state() ? s->state : NAN; };
+            mixer_control::Inputs in;
+            in.boiler = t(id(temp_boiler_flow));
+            in.mixed = t(id(temp_mixed_flow));
+            in.ret = t(id(temp_return));
+            in.pump_on = pump_on;
+            in.automatic = automatic && pz.known();
+            in.dt = (millis() - last_ms) / 1000.0f;
+            last_ms = millis();
+            mixer_control::Settings cfg;
+            cfg.setpoint = id(mixed_setpoint).state;
+            cfg.limit = id(mixed_limit).state;
+            cfg.kp = id(mixer_kp).state;
+            cfg.ti = id(mixer_ti).state;
+            c.update(in, cfg);
 
-          if (drive && id(mixer_servo).is_online()) {
-            int goal = lroundf(id(mixer_cold_pos).state + c.opening() * (id(mixer_hot_pos).state - id(mixer_cold_pos).state));
-            if (last_goal < 0 || std::abs(goal - last_goal) >= 2) {
-              id(mixer_servo).set_goal_position(goal);
-              last_goal = goal;
+            // Over-temperature (or no mixed reading for 30 s): CFH off, and kept off until it clears.
+            if (c.over_temp() && id(relay1).state) {
+              ESP_LOGW("mixer", "Mixed flow %.1f °C over limit %.1f °C (or no reading): boiler CFH off",
+                       in.mixed, cfg.limit);
+              id(relay1).turn_off();
             }
           }
-          if (!in.automatic) last_goal = -1;
-          float pct = c.opening() * 100;
-          if (in.automatic && (!id(mixer_opening).has_state() || std::fabs(id(mixer_opening).state - pct) >= 1))
-            id(mixer_opening).publish_state(pct);
+
+          // --- Positioner ---
+          mixer_control::PosConfig pc;
+          pc.stroke_s = id(mixer_stroke).state;
+          pc.backlash_s = id(mixer_backlash).state;
+          pc.deadband = id(mixer_deadband).state / 100;
+          // Find the valve again when auto starts the pump, or if the position was lost (jog, servo offline).
+          if (automatic && pump_on && !pump_was_on) pz.request_home();
+          if (automatic && !pz.known() && pz.mode() == mixer_control::PosMode::IDLE && pc.stroke_s > 0) pz.request_home();
+          pump_was_on = pump_on;
+
+          if (moving && !sv.is_running()) {
+            moving = false;
+            const auto &r = sv.last_run();
+            if (r.failed) {
+              pz.lost();
+            } else {
+              pz.done(mv, r.ms / 1000.0f, r.stalled, pc);
+              float stroke = pz.take_measured_stroke();
+              if (stroke > 0) {
+                ESP_LOGI("mixer", "Calibrated stroke: %.1f s", stroke);
+                auto call = id(mixer_stroke).make_call();
+                call.set_value(stroke);
+                call.perform();
+              }
+            }
+          }
+          if (!sv.is_online()) {
+            if (sv.is_running()) sv.stop_run();
+            pz.lost();
+          } else if (!moving && !sv.is_running()) {
+            // Control moves only in auto (over-temp drives the target to cold).
+            const bool control = automatic && (c.over_temp() || pump_on);
+            if (pz.next(c.opening(), control, pc, &mv)) {
+              int duty = mv.dir * int(id(mixer_power).state * 10) * (id(mixer_reverse).state ? -1 : 1);
+              moving = sv.start_run(duty, uint32_t(mv.seconds * 1000), int(id(mixer_stall_current).state));
+            }
+          }
+
+          // --- Reporting ---
+          if (pz.known()) {
+            float pct = pz.position() * 100;
+            if (!id(mixer_opening).has_state() || std::fabs(id(mixer_opening).state - pct) >= 1)
+              id(mixer_opening).publish_state(pct);
+          }
           const char *st = mixer_control::status_text(c.status());
+          switch (pz.mode()) {
+            case mixer_control::PosMode::HOMING: st = "Homing"; break;
+            case mixer_control::PosMode::CAL_HOME:
+            case mixer_control::PosMode::CAL_MEASURE:
+            case mixer_control::PosMode::CAL_RETURN: st = "Calibrating"; break;
+            default:
+              if (pz.cal_failed()) st = "Cal failed";
+              else if (automatic && pc.stroke_s <= 0) st = "Not calibrated";
+          }
+          if (c.over_temp()) st = "Over-temp";
           if (id(heating_status).state != st) id(heating_status).publish_state(st);
 
 text_sensor:
