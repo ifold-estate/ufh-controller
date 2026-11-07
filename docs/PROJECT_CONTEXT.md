@@ -266,6 +266,12 @@ flow guard on CFH. Pump on speed setting 2 (of 3).
 - [ ] Which DS18B20 positions: flow (after the mixer) is essential, and return is recommended.
       Anything else, such as the boiler flow side?
 
+- [ ] Servo coupling (7 Nov 2026): Jon will drive the mixer through part of the old actuator's
+      gearbox (~3:1–4:1). The mixer arm turns ~90°, so the servo needs ~270–360°, beyond the SC15's
+      ~210° position mode. Options: SC15 in continuous (wheel) mode with floating control and stall
+      homing, or a multi-turn magnetic-encoder servo (e.g. ST3215) keeping absolute position. The
+      current `mixer_control.h` assumes absolute position.
+
 **Next work:**
 
 1. ~~Push v0.1, let CI compile it, and fix any build errors.~~ Done.
