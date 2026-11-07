@@ -204,8 +204,10 @@ void SCSServo::loop() {
   int current = (cur_raw & 0x8000) ? -int(cur_raw & 0x7FFF) : int(cur_raw);
   this->last_position_ = pos;
   this->run_.peak_current = std::max(this->run_.peak_current, std::abs(current));
-  ESP_LOGD(TAG, "  t=%4u ms pos=%4u speed=%5d current=%4d", (unsigned) (now - this->run_start_), pos, speed,
-           current);
+  uint16_t load_raw = (uint16_t(d[4]) << 8) | d[5];
+  int load = (load_raw & 0x0400) ? -int(load_raw & 0x03FF) : int(load_raw & 0x03FF);
+  ESP_LOGD(TAG, "  t=%4u ms pos=%4u speed=%5d load=%5d current=%4d moving=%u volt=%.1f", (unsigned) (now - this->run_start_),
+           pos, speed, load, current, d[10], d[6] / 10.0f);
   if (this->end_check_ && this->end_check_(this->run_duty_ > 0 ? 1 : -1)) {
     ESP_LOGD(TAG, "  end of travel signalled");
     this->finish_run_(true, false);
