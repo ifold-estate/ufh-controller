@@ -331,6 +331,17 @@ controller drives the valve back. Simulator: tracks an idle push through the gap
 The cam limit switches (DI5–8) would give absolute reference points and remove the risk of losing
 a turn; Jon is reconsidering them despite the lack of space.
 
+**Hand test (7 Nov, 19:00):** the servo/gearbox can't be turned by hand (self-locking), so flow can't
+back-drive the servo. But the valve lever moves freely between ~33 % and ~50 % with the servo
+still: the ~17 % lever play. Inside that band nothing holds the valve, so water forces can float it
+to either side; that explains the retest's 31 → 48.8 °C jump with the servo stationary (in the
+steep middle of this valve, 17 % is ~17 °C), and breaks the firmware's assumption that the valve
+trails the shaft in the last direction moved. **This needs a mechanical fix** before more heated
+tests: Jon is dismantling the linkage to reduce the play, and looking for a light preload spring
+to hold the lever on one side of whatever play remains (then set Mixer play to 0). After reassembly:
+check the servo index (raw ~512 at ~1/3 open), redo the cold end / stroke / play settings, and
+re-run the position checks before heating. Decided: try without the limit switches for now.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
