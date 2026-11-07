@@ -138,20 +138,167 @@ class Controller {
   Status status_ = Status::OFF;
 };
 
-// Valve position for a servo in continuous (motor) mode, which can't report an absolute position
-// through the ~3.5:1 gearbox. Position is estimated from run time:
-//   - Homing: drive to the cold end (stall or limit switch), position 0. Done when auto turns on and
-//     at every pump start, so timing errors never build up.
-//   - Calibration: cold end -> hot end, timing the stroke; then back to cold.
-//   - Normal moves run for |target - position| x stroke time. Reversing first takes up the lever's
-//     play (backlash time), which doesn't count as movement.
-//   - Reaching an end (stall/limit) snaps the estimate to 0 or 1; a target at an end drives a little
-//     past it once to re-sync.
+// ----------------------------------------------------------------------------------------------
+// Servo shaft position for the SC15 in continuous (motor) mode, driving the mixer through the old
+// actuator's gearbox (stroke ~430° of servo rotation, bench 7 Nov 2026).
+//
+// The SC15's potentiometer reads 0..1023 over ~210° and is blind for the other ~150° of each turn:
+// near the edges the reading sticks (~0 or ~1019), and inside the gap it can be any value (a stalled
+// reading of 811 was seen there). Towards hot the reading counts down. Axis x, counts, hot positive:
+// in window k, x = k*TURN + (1023 - raw); the gap below window k spans x = k*TURN - GAP .. k*TURN.
+constexpr int TURN = 1755;              // counts per turn at 1024 counts per 210°
+constexpr int WIN = 1023, GAP = TURN - WIN;
+
+class Tracker {
+ public:
+  // Position now known to be x (e.g. at the cold end after homing), in the gap or in a window.
+  void set(float x) {
+    x_ = x;
+    known_ = true;
+    provisional_ = false;
+    consistent_ = 0;
+    first_ = -1;
+    still_ = 0;
+    pending_ = -1;
+    int k = int(std::floor(x / TURN));
+    float in_turn = x - k * TURN;  // 0..TURN: window 0..WIN, then gap to the next window
+    if (in_turn <= WIN) {
+      in_gap_ = false; k_ = k; last_raw_ = WIN - int(in_turn);
+    } else {
+      in_gap_ = true; gap_k_ = k + 1; gap_travel_ = 0;
+    }
+  }
+  void forget() { known_ = false; }
+  // Position unknown but inside the gap below window `gap_k` (e.g. at a cold end found by homing).
+  void set_in_gap(int gap_k) {
+    known_ = true; in_gap_ = true; provisional_ = true; gap_k_ = gap_k; x_ = gap_k * TURN - GAP / 2.0f;
+    gap_travel_ = 0; pending_ = first_ = -1; consistent_ = 0; still_ = 0;
+  }
+
+  // Feed every reading. dir: drive direction (+1 hot, -1 cold, 0 idle); dt: s since the last one;
+  // driving: false while coasting after a stop (the gap estimate then holds; see coast()).
+  void sample(int raw, int dir, float dt, bool driving = true) {
+    if (!known_) return;
+    const bool inside = raw >= 6 && raw <= 1016;
+    if (!in_gap_) {
+      if (probation_ > 0 && !(inside && std::abs(raw - last_raw_) <= 150)) {
+        // The readings didn't carry on from the gap exit: it was a false one. Back into the gap.
+        in_gap_ = true;
+        x_ = saved_x_;
+        gap_k_ = saved_gap_k_;
+        gap_travel_ = saved_travel_;
+        provisional_ = saved_provisional_;
+        exits_--;
+        probation_ = 0;
+        pending_ = first_ = -1;
+        consistent_ = 0;
+        return;
+      }
+      if (inside && std::abs(raw - last_raw_) <= 150) {
+        if (probation_ > 0) probation_--;
+        const int d = raw - last_raw_;
+        still_ = std::abs(d) <= 2 ? still_ + 1 : 0;
+        if (dt > 0 && std::abs(d) > 2) speed_ = 0.7f * speed_ + 0.3f * (std::abs(d) / dt);
+        last_raw_ = raw;
+        x_ = k_ * TURN + (WIN - raw);
+        return;
+      }
+      // Left the window: into the gap below it (reading heading for 0) or above it (heading for 1023).
+      in_gap_ = true;
+      gap_k_ = last_raw_ < 512 ? k_ + 1 : k_;
+      gap_travel_ = 0;
+      pending_ = -1;
+      still_ = 0;
+    }
+    // In the gap. Leave it only on readings moving the right way: moving hot the reading falls,
+    // moving cold it rises, by 5-150 counts per poll. Two in a row are enough when the first is at
+    // the edge where the window starts (just under 1023 going hot, just over 0 going cold); otherwise
+    // three. Readings stuck in the gap, or random ones, don't pass.
+    const bool inside_now = raw >= 6 && raw <= 1016;
+    int step = 0;
+    if (inside_now && dir != 0 && pending_ >= 0) step = dir > 0 ? pending_ - raw : raw - pending_;
+    if (step >= 5 && step <= 150) {
+      consistent_++;
+    } else {
+      consistent_ = 0;
+      first_ = (inside_now && dir != 0) ? raw : -1;  // a new run of readings may start here
+    }
+    pending_ = inside_now ? raw : -1;
+    const bool from_edge = dir > 0 ? first_ >= 940 : (first_ >= 0 && first_ <= 80);
+    const int need = provisional_ ? (from_edge ? 2 : 4) : (from_edge ? 2 : 3);
+    const int new_k = dir > 0 ? gap_k_ : gap_k_ - 1;
+    const float exact = new_k * TURN + (WIN - raw);
+    // Once the position is trusted, the estimate must also have got at least a quarter of the way
+    // across the gap towards this side (it lags when friction changes, so no tighter than that).
+    const float lo = gap_k_ * TURN - GAP, hi = gap_k_ * TURN;
+    const bool plausible = provisional_ || (dir > 0 ? x_ >= lo + 0.25f * GAP : x_ <= hi - 0.25f * GAP);
+    if (consistent_ >= need && plausible) {
+      saved_x_ = x_; saved_gap_k_ = gap_k_; saved_travel_ = gap_travel_; saved_provisional_ = provisional_;
+      probation_ = 2;
+      in_gap_ = false;
+      provisional_ = false;
+      k_ = new_k;
+      last_raw_ = raw;
+      exit_error_ = x_ - exact;
+      last_gap_travel_ = gap_travel_;
+      x_ = exact;
+      exits_++;
+      consistent_ = 0;
+      return;
+    }
+    // Estimate from the last measured speed (at least a typical one), kept inside the gap.
+    if (!driving) return;
+    const float v = std::max(speed_, 300.0f);
+    x_ += dir * v * dt;
+    gap_travel_ += dir * v * dt;
+    x_ = std::clamp(x_, float(gap_k_ * TURN - GAP), float(gap_k_ * TURN));
+  }
+
+  bool known() const { return known_; }
+  bool in_gap() const { return in_gap_; }
+  float x() const { return x_; }
+  // Driving but the reading hasn't moved for `polls` readings (only detectable in a window).
+  bool stalled(int polls = 3) const { return !in_gap_ && still_ >= polls; }
+  int gap_exits() const { return exits_; }
+  float last_exit_error() const { return exit_error_; }  // estimate minus truth at the last gap exit
+  float last_gap_travel() const { return last_gap_travel_; }  // estimated drive inside that gap
+  int last_raw() const { return last_raw_; }
+  void set_speed(float counts_per_s) { speed_ = counts_per_s; }
+  void reset_still() { still_ = 0; }
+  // After a stop: if still in the gap, allow for the coast once.
+  void coast(int dir, float dist) {
+    if (!in_gap_) return;
+    x_ = std::clamp(x_ + dir * dist, float(gap_k_ * TURN - GAP), float(gap_k_ * TURN));
+    gap_travel_ += dir * dist;
+  }
+
+ protected:
+  float x_ = 0, speed_ = 350;  // counts/s, last measured (bench: 150-500 at 30 %)
+  float gap_travel_ = 0, last_gap_travel_ = 0, exit_error_ = 0;
+  float saved_x_ = 0, saved_travel_ = 0;  // state before the last gap exit, while it's on probation
+  int saved_gap_k_ = 0, probation_ = 0;
+  bool saved_provisional_ = false;
+  int k_ = 0, gap_k_ = 0, last_raw_ = 0, pending_ = -1, first_ = -1, consistent_ = 0, still_ = 0, exits_ = 0;
+  bool in_gap_ = true, known_ = false, provisional_ = false;
+};
+
+// Moves the valve to a target opening using the tracked shaft position.
+//   - Opening = (x - cold_x) / stroke_x, with the lever play allowed for: after moving hot the valve
+//     trails the shaft by play/2, after moving cold it leads by play/2.
+//   - Homing: drive cold for home_s at drive power (pushing gently on the cold stop), then x = cold_x.
+//     If the cold end is inside a window, a stall ends it sooner. Done when auto turns on, at pump
+//     start and whenever the position is lost.
+//   - A move runs towards the target and is stopped (by the caller's monitor) coast_x short of it.
+//   - Calibration: home, then drive hot to the hot end (stall in a window), measuring cold_x (from
+//     where the reading first leaves the gap, if the cold end is in one) and stroke_x.
 struct PosConfig {
-  float stroke_s = 0;    // full cold->hot run time; 0 = not calibrated
-  float backlash_s = 0;  // run time to take up the play when reversing
-  float deadband = 0.03f;
-  float max_run_s = 5;   // longest single move, so control stays responsive
+  float cold_x = -300;    // x at the cold end
+  float stroke_x = 0;     // x(hot end) - x(cold end); 0 = not calibrated
+  float play_x = 0;       // lever play, counts
+  float coast_x = 50;     // the shaft coasts on this far after the drive stops
+  float deadband = 0.03f; // of the stroke
+  float home_s = 12;      // cold homing run time (s)
+  float max_run_s = 6;    // longest single move
 };
 
 enum class PosMode : uint8_t { IDLE, HOMING, CAL_HOME, CAL_MEASURE, CAL_RETURN, READY };
@@ -159,103 +306,134 @@ enum class PosMode : uint8_t { IDLE, HOMING, CAL_HOME, CAL_MEASURE, CAL_RETURN, 
 class Positioner {
  public:
   struct Move {
-    int dir = 0;         // +1 towards hot, -1 towards cold
-    float seconds = 0;   // run time
-    bool to_end = false; // expected to finish at an end (stall/limit)
+    int dir = 0;          // +1 hot, -1 cold
+    float target_x = 0;   // stop here (minus coast); ignored for to_end moves
+    float max_s = 0;
+    bool to_end = false;  // run until an end (stall) or max_s
   };
 
+  Tracker &tracker() { return tr_; }
   void request_home() {
     if (mode_ != PosMode::CAL_HOME && mode_ != PosMode::CAL_MEASURE && mode_ != PosMode::CAL_RETURN)
       mode_ = PosMode::HOMING;
   }
-  void request_calibration() { mode_ = PosMode::CAL_HOME; cal_failed_ = false; }
+  void request_calibration() { mode_ = PosMode::CAL_HOME; cal_failed_ = false; first_exit_seen_ = false; }
+  void lost() { tr_.forget(); if (mode_ == PosMode::READY) mode_ = PosMode::IDLE; }
 
-  // Next move towards `target` (0..1), or false if none is needed. Call only while the servo is idle.
-  // `move_valve` false: only homing/calibration moves, no control moves.
+  float opening(const PosConfig &c) const {
+    if (c.stroke_x <= 0) return NAN;
+    float valve_x = tr_.x() - last_dir_ * c.play_x / 2;
+    return std::clamp((valve_x - c.cold_x) / c.stroke_x, 0.0f, 1.0f);
+  }
+  bool known() const { return mode_ == PosMode::READY && tr_.known(); }
+
+  // Next move towards `target` opening, or false. Call only while the servo is idle.
   bool next(float target, bool move_valve, const PosConfig &c, Move *m) {
-    const float cal_s = 120;  // generous limit for an end-to-end run while calibrating
+    if (!next_(target, move_valve, c, m)) return false;
+    polls_ = 0;
+    tr_.reset_still();
+    return true;
+  }
+
+  // Polled by the servo driver during a move: true = stop now. Stalls count only after the kick and
+  // spin-up (4 polls, 0.4 s).
+  bool should_stop(const Move &m, const PosConfig &c) {
+    polls_++;
+    if (polls_ >= 4 && tr_.stalled()) return true;  // at an end (or jammed)
+    if (m.to_end || !tr_.known()) return false;
+    return m.dir > 0 ? tr_.x() >= m.target_x - c.coast_x : tr_.x() <= m.target_x + c.coast_x;
+  }
+  bool stalled_now() const { return polls_ >= 4 && tr_.stalled(); }
+
+ protected:
+  bool next_(float target, bool move_valve, const PosConfig &c, Move *m) {
     switch (mode_) {
-      case PosMode::CAL_HOME: *m = {-1, cal_s, true}; return true;
-      case PosMode::CAL_MEASURE: *m = {+1, cal_s, true}; return true;
-      case PosMode::CAL_RETURN: *m = {-1, cal_s, true}; return true;
+      case PosMode::CAL_HOME:
+      case PosMode::CAL_RETURN: *m = {-1, 0, c.home_s, true}; return true;
+      case PosMode::CAL_MEASURE: *m = {+1, 0, 60, true}; return true;
       case PosMode::HOMING:
-        if (c.stroke_s <= 0) return false;
-        *m = {-1, c.stroke_s * 1.3f + c.backlash_s, true};
+        if (c.stroke_x <= 0) return false;
+        *m = {-1, 0, c.home_s, true};
         return true;
       case PosMode::IDLE: return false;
       case PosMode::READY: break;
     }
-    if (!move_valve || c.stroke_s <= 0) return false;
+    if (!move_valve || c.stroke_x <= 0) return false;
     target = std::clamp(target, 0.0f, 1.0f);
-    if (target > 0.05f) cold_resynced_ = false;
-    if (target < 0.95f) hot_resynced_ = false;
-    float extra = (last_dir_ != 0) ? c.backlash_s : 0;
-    if (target <= 0.001f && pos_ <= 0.001f && !cold_resynced_) {
-      cold_resynced_ = true;
-      *m = {-1, 0.15f * c.stroke_s + (last_dir_ > 0 ? extra : 0), true};
-      return true;
-    }
-    if (target >= 0.999f && pos_ >= 0.999f && !hot_resynced_) {
-      hot_resynced_ = true;
-      *m = {+1, 0.15f * c.stroke_s + (last_dir_ < 0 ? extra : 0), true};
-      return true;
-    }
-    const float e = target - pos_;
-    if (std::fabs(e) < c.deadband) return false;
-    const int dir = e > 0 ? 1 : -1;
-    float secs = std::min(std::fabs(e) * c.stroke_s, c.max_run_s);
-    if (last_dir_ != 0 && dir != last_dir_) secs += c.backlash_s;
-    *m = {dir, secs, false};
+    const float now = opening(c);
+    if (std::fabs(target - now) < c.deadband) return false;
+    // Targets at the ends: drive into the end (re-syncs at the hot end, pushes the cold end shut).
+    const int dir = target > now ? 1 : -1;
+    if (target <= 0.001f) { *m = {-1, 0, c.max_run_s, true}; return true; }
+    if (target >= 0.999f) { *m = {+1, 0, c.max_run_s, true}; return true; }
+    // Shaft target: allow for the play when this move's direction differs from the last one.
+    float tx = c.cold_x + target * c.stroke_x + dir * c.play_x / 2;
+    *m = {dir, tx, c.max_run_s, false};
     return true;
   }
 
-  // Report how a move went: how long it ran and whether it ended at an end (stall or limit switch).
-  void done(const Move &m, float ran_s, bool at_end, const PosConfig &c) {
-    const bool reversed = last_dir_ != 0 && m.dir != last_dir_;
+
+ public:
+  // After a move (including the coast): stalled = it stopped on a stall. `raw` = latest reading.
+  void done(const Move &m, bool stalled, int raw, PosConfig *c) {
     last_dir_ = m.dir;
+    if (!stalled) tr_.coast(m.dir, c->coast_x);
     switch (mode_) {
       case PosMode::CAL_HOME:
-        if (at_end) { mode_ = PosMode::CAL_MEASURE; pos_ = 0; } else { fail_cal_(); }
+        // At the cold end. Frame: window 0 is the first window met going hot. If the reading is
+        // valid here the cold end is in that window; otherwise it's in the gap below it, and its
+        // place is worked out when the reading first leaves the gap.
+        // A single reading here can't be trusted (the gap gives random or stuck values), so start
+        // "in the gap below window 0" and let the first consistent movement place it.
+        (void) raw;
+        tr_.set_in_gap(0);
+        cold_in_gap_ = true;
+        exits_at_home_ = tr_.gap_exits();
+        x_at_home_ = tr_.x();
+        mode_ = PosMode::CAL_MEASURE;
         return;
-      case PosMode::CAL_MEASURE:
-        if (at_end) { measured_stroke_ = std::max(0.0f, ran_s - c.backlash_s); pos_ = 1; mode_ = PosMode::CAL_RETURN; }
-        else { fail_cal_(); }
+      case PosMode::CAL_MEASURE: {
+        if (!stalled || tr_.in_gap()) { fail_cal_(); return; }
+        float cold_x = x_at_home_;
+        if (cold_in_gap_) {
+          if (!first_exit_seen_) { fail_cal_(); return; }
+          cold_x = first_exit_x_ - first_exit_travel_;
+        }
+        c->cold_x = cold_x;
+        c->stroke_x = tr_.x() - cold_x;
+        calibrated_ = true;
+        mode_ = PosMode::CAL_RETURN;
         return;
+      }
       case PosMode::CAL_RETURN:
       case PosMode::HOMING:
-        pos_ = 0;  // ran long enough towards cold to be there even without an end signal
-        homed_ = true;
-        cold_resynced_ = true;
+        tr_.set(c->cold_x);
+        last_dir_ = -1;
         mode_ = PosMode::READY;
         return;
       default: break;
     }
-    if (at_end) {
-      pos_ = m.dir > 0 ? 1 : 0;
-      return;
+  }
+  // Call after every sample during calibration: notes where the reading first leaves the gap.
+  void watch_calibration() {
+    if (mode_ == PosMode::CAL_MEASURE && cold_in_gap_ && !first_exit_seen_ && tr_.gap_exits() > exits_at_home_) {
+      first_exit_seen_ = true;
+      first_exit_x_ = tr_.x();
+      first_exit_travel_ = tr_.last_gap_travel();
     }
-    if (c.stroke_s <= 0) return;
-    const float moved = std::max(0.0f, ran_s - (reversed ? c.backlash_s : 0)) / c.stroke_s;
-    pos_ = std::clamp(pos_ + m.dir * moved, 0.0f, 1.0f);
   }
 
-  // Abandon any move in progress (e.g. servo went offline): position no longer trusted.
-  void lost() { homed_ = false; if (mode_ == PosMode::READY) mode_ = PosMode::IDLE; }
-
-  bool known() const { return homed_ && mode_ == PosMode::READY; }
-  float position() const { return pos_; }
   PosMode mode() const { return mode_; }
   bool cal_failed() const { return cal_failed_; }
-  // A newly measured stroke time (once), for the caller to store.
-  float take_measured_stroke() { float s = measured_stroke_; measured_stroke_ = 0; return s; }
+  bool take_calibrated() { bool c = calibrated_; calibrated_ = false; return c; }
 
  protected:
-  void fail_cal_() { cal_failed_ = true; homed_ = false; mode_ = PosMode::IDLE; }
+  void fail_cal_() { cal_failed_ = true; tr_.forget(); mode_ = PosMode::IDLE; }
 
-  float pos_ = 0;
-  int last_dir_ = 0;
-  bool homed_ = false, cal_failed_ = false, cold_resynced_ = false, hot_resynced_ = false;
-  float measured_stroke_ = 0;
+  Tracker tr_;
+  int last_dir_ = -1, exits_at_home_ = 0, polls_ = 0;
+  float x_at_home_ = 0, first_exit_x_ = 0, first_exit_travel_ = 0;
+  bool cal_failed_ = false, calibrated_ = false, cold_in_gap_ = false, first_exit_seen_ = false;
   PosMode mode_ = PosMode::IDLE;
 };
 
@@ -268,6 +446,19 @@ inline Controller &instance() {
 inline Positioner &positioner() {
   static Positioner p;
   return p;
+}
+inline PosConfig &pos_config() {
+  static PosConfig c;
+  return c;
+}
+// The positioner's move in progress (the servo driver also runs plain jogs, which have none).
+inline Positioner::Move &current_move() {
+  static Positioner::Move m;
+  return m;
+}
+inline bool &move_active() {
+  static bool a = false;
+  return a;
 }
 
 }  // namespace mixer_control

@@ -254,9 +254,22 @@ show the cam pattern; then wire them into `set_end_check` for homing without sta
 - **Friction** varies with angle, with stiction near the middle; free speed ~450–500 steps/s,
   ~150–300 in the stiff region. The lever has some play.
 
-Next design step (not yet done): absolute position from the sensor with turn counting (run time only
-across the gap), ends from the cam limit switches (DI5–8), a breakaway kick plus lower drive power for
-fine moves.
+- **Re-indexed** (7 Nov): the servo was set to raw 512 (window centre) with the valve 1/3 open and
+  re-attached, so the usual working range (~10–55 % open) is in the window, the hot end in the next
+  window, and the cold end ~35° into the gap. Limit switches are not being wired (no room).
+
+**Positioning (v0.3, `mixer_control.h`):** a `Tracker` follows the shaft on an axis of sensor counts
+(1755 per turn): exact inside a window, estimated from the last measured speed across the gap.
+It leaves the gap only on readings that move consistently the right way (2–4 in a row, fewer from
+the expected edge), only once the estimate is at least a quarter of the way across, and on
+probation: if the next two readings don't carry on, the exit is undone (random or stuck gap readings,
+like the 811, never pass). The `Positioner` moves closed-loop on that position: each move starts with
+a 0.2 s kick (60 %) to break stiction, runs at the drive power (30 %), and is stopped "Mixer coast"
+counts short of the target; the gap estimate holds while coasting. Homing is a timed cold run (the
+cold end is in the gap, so it can't be seen); calibration then drives hot until the sensor shows a
+stall, measuring the cold end (from where the reading first leaves the gap) and the stroke. In the
+simulator (random gap readings, stiction, coast, lever play up to 30°) it calibrates within ~10 %,
+holds the mix within ~1 °C, and makes ~40 moves/hour when steady.
 
 **Commissioning (servo on the valve, Mixer auto off):**
 

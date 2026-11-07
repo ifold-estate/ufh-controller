@@ -20,6 +20,20 @@ esphome:
   includes:
     - ufh_screen.h      # LCD heat-flow screen (preview it with tools/screen_preview/render.py)
     - mixer_control.h   # mixed-flow control and over-temperature cut-out (test: tools/mixer_sim)
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          // Every servo reading goes to the position tracker; moves stop when the positioner says so.
+          id(mixer_servo).set_sample_callback([](int raw, int dir, float dt, bool driving) {
+            auto &pz = mixer_control::positioner();
+            pz.tracker().sample(raw, dir, dt, driving);
+            pz.watch_calibration();
+          });
+          id(mixer_servo).set_stop_check([]() {
+            return mixer_control::move_active() &&
+                   mixer_control::positioner().should_stop(mixer_control::current_move(), mixer_control::pos_config());
+          });
 
 esp32:
   variant: esp32s3
@@ -179,9 +193,8 @@ switch:
 
 # ---------------------------------------------------------------- Mixer servo commissioning
 # The servo runs in continuous (motor) mode through the old actuator's gearbox: set it once with
-# "Servo motor mode". Jog to check direction (and watch the logs for current/position during runs);
-# then "Mixer calibrate" times a full cold-to-hot stroke, which needs a working end detection (stall
-# current or limit switches).
+# "Servo motor mode". Jog to check direction (the logs show position during runs); then "Mixer
+# calibrate": cold end (timed push), then hot end (stall seen by the position sensor), storing both.
 button:
   - platform: template
     name: "Servo motor mode"
@@ -198,27 +211,22 @@ button:
     entity_category: config
     on_press:
       - lambda: |-
-          mixer_control::positioner().lost();
+          // The tracker follows the jog; in auto the controller will move back to its target.
           int duty = int(id(mixer_power).state * 10) * (id(mixer_reverse).state ? -1 : 1);
-          id(mixer_servo).start_run(duty, 1000, int(id(mixer_stall_current).state));
+          id(mixer_servo).start_run(duty, 1000, duty * int(id(mixer_kick).state) / int(id(mixer_power).state), 200);
   - platform: template
     name: "Mixer jog cold"
     entity_category: config
     on_press:
       - lambda: |-
-          mixer_control::positioner().lost();
+          // The tracker follows the jog; in auto the controller will move back to its target.
           int duty = -int(id(mixer_power).state * 10) * (id(mixer_reverse).state ? -1 : 1);
-          id(mixer_servo).start_run(duty, 1000, int(id(mixer_stall_current).state));
+          id(mixer_servo).start_run(duty, 1000, duty * int(id(mixer_kick).state) / int(id(mixer_power).state), 200);
   - platform: template
     name: "Mixer calibrate"
     entity_category: config
     on_press:
-      - lambda: |-
-          if (id(mixer_stall_current).state <= 0) {
-            ESP_LOGW("mixer", "Calibration needs end detection: set Mixer stall current first");
-            return;
-          }
-          mixer_control::positioner().request_calibration();
+      - lambda: 'mixer_control::positioner().request_calibration();'
   - platform: template
     name: "Mixer home"
     entity_category: config
@@ -355,25 +363,13 @@ number:
     mode: box
     entity_category: config
   - platform: template
-    id: mixer_stroke
-    name: "Mixer stroke time"   # full cold->hot run at the drive power; set by Mixer calibrate
-    unit_of_measurement: "s"
-    min_value: 0
-    max_value: 300
-    step: 0.1
-    initial_value: 0
-    optimistic: true
-    restore_value: true
-    mode: box
-    entity_category: config
-  - platform: template
-    id: mixer_backlash
-    name: "Mixer backlash"      # extra run time to take up the lever's play when reversing
-    unit_of_measurement: "s"
-    min_value: 0
-    max_value: 30
-    step: 0.1
-    initial_value: 0
+    id: mixer_kick
+    name: "Mixer kick power"    # first 0.2 s of every move, to break the valve's stiction
+    unit_of_measurement: "%"
+    min_value: 5
+    max_value: 100
+    step: 1
+    initial_value: 60
     optimistic: true
     restore_value: true
     mode: box
@@ -391,12 +387,58 @@ number:
     mode: box
     entity_category: config
   - platform: template
-    id: mixer_stall_current
-    name: "Mixer stall current"  # raw servo units; 0 = off. Pick from the run logs.
+    id: mixer_home_time
+    name: "Mixer home time"     # cold homing run (pushes gently on the cold stop at the end)
+    unit_of_measurement: "s"
+    min_value: 2
+    max_value: 60
+    step: 0.5
+    initial_value: 12
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  # Positions in servo sensor counts along the stroke (1755 per turn); set by Mixer calibrate.
+  - platform: template
+    id: mixer_cold_x
+    name: "Mixer cold end"
+    min_value: -5000
+    max_value: 5000
+    step: 1
+    initial_value: -300
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: mixer_stroke_x
+    name: "Mixer stroke"        # 0 = not calibrated
     min_value: 0
-    max_value: 2000
+    max_value: 10000
     step: 1
     initial_value: 0
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: mixer_play_x
+    name: "Mixer play"          # lever play, in the same counts
+    min_value: 0
+    max_value: 500
+    step: 1
+    initial_value: 0
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: mixer_coast_x
+    name: "Mixer coast"         # how far the shaft runs on after the drive stops
+    min_value: 0
+    max_value: 300
+    step: 1
+    initial_value: 50
     optimistic: true
     restore_value: true
     mode: box
@@ -490,7 +532,7 @@ display:
       st.mixed = t(id(temp_mixed_flow));
       st.ret = t(id(temp_return));
       auto &pz = mixer_control::positioner();
-      if (id(mixer_servo).is_online() && pz.known()) st.mixer_pct = pz.position() * 100;
+      if (id(mixer_servo).is_online() && pz.known()) st.mixer_pct = pz.opening(mixer_control::pos_config()) * 100;
       st.boiler_on = id(relay1).state;
       st.floor_pump_on = id(relay2).state;
       // Zone valves on relays 4-8; which dot is which room is provisional until the zones are mapped.
@@ -528,7 +570,6 @@ interval:
           static uint8_t tick = 0;
           static uint32_t last_ms = millis();
           static bool moving = false, pump_was_on = false;
-          static mixer_control::Positioner::Move mv;
           auto &c = mixer_control::instance();
           auto &pz = mixer_control::positioner();
           auto *sv = id(mixer_servo);
@@ -562,29 +603,39 @@ interval:
           }
 
           // --- Positioner ---
-          mixer_control::PosConfig pc;
-          pc.stroke_s = id(mixer_stroke).state;
-          pc.backlash_s = id(mixer_backlash).state;
+          auto &pc = mixer_control::pos_config();
+          pc.cold_x = id(mixer_cold_x).state;
+          pc.stroke_x = id(mixer_stroke_x).state;
+          pc.play_x = id(mixer_play_x).state;
+          pc.coast_x = id(mixer_coast_x).state;
           pc.deadband = id(mixer_deadband).state / 100;
-          // Find the valve again when auto starts the pump, or if the position was lost (jog, servo offline).
+          pc.home_s = id(mixer_home_time).state;
+          auto &mv = mixer_control::current_move();
+          // Find the valve again when auto starts the pump, or if the position was lost.
           if (automatic && pump_on && !pump_was_on) pz.request_home();
-          if (automatic && !pz.known() && pz.mode() == mixer_control::PosMode::IDLE && pc.stroke_s > 0) pz.request_home();
+          if (automatic && !pz.known() && pz.mode() == mixer_control::PosMode::IDLE && pc.stroke_x > 0) pz.request_home();
           pump_was_on = pump_on;
+
+          static int exits_seen = 0;
+          if (pz.tracker().gap_exits() != exits_seen) {
+            exits_seen = pz.tracker().gap_exits();
+            ESP_LOGD("mixer", "Left the sensor gap: estimate was %.0f counts out", pz.tracker().last_exit_error());
+          }
 
           if (moving && !sv->is_running()) {
             moving = false;
+            mixer_control::move_active() = false;
             const auto &r = sv->last_run();
             if (r.failed) {
               pz.lost();
             } else {
-              pz.done(mv, r.ms / 1000.0f, r.stalled, pc);
-              float stroke = pz.take_measured_stroke();
-              if (stroke > 0) {
-                ESP_LOGI("mixer", "Calibrated stroke: %.1f s", stroke);
-                auto call = id(mixer_stroke).make_call();
-                call.set_value(stroke);
-                call.perform();
+              pz.done(mv, r.stopped && pz.stalled_now(), sv->last_position(), &pc);
+              if (pz.take_calibrated()) {
+                ESP_LOGI("mixer", "Calibrated: cold end %.0f, stroke %.0f counts", pc.cold_x, pc.stroke_x);
+                auto c1 = id(mixer_cold_x).make_call(); c1.set_value(pc.cold_x); c1.perform();
+                auto c2 = id(mixer_stroke_x).make_call(); c2.set_value(pc.stroke_x); c2.perform();
               }
+              if (pz.cal_failed()) ESP_LOGW("mixer", "Calibration failed: no stall seen at the hot end");
             }
           }
           if (!sv->is_online()) {
@@ -594,14 +645,17 @@ interval:
             // Control moves only in auto (over-temp drives the target to cold).
             const bool control = automatic && (c.over_temp() || pump_on);
             if (pz.next(c.opening(), control, pc, &mv)) {
-              int duty = mv.dir * int(id(mixer_power).state * 10) * (id(mixer_reverse).state ? -1 : 1);
-              moving = sv->start_run(duty, uint32_t(mv.seconds * 1000), int(id(mixer_stall_current).state));
+              const int power = int(id(mixer_power).state * 10) * (id(mixer_reverse).state ? -1 : 1);
+              const int kick = int(id(mixer_kick).state * 10) * (id(mixer_reverse).state ? -1 : 1);
+              mixer_control::move_active() = true;
+              moving = sv->start_run(mv.dir * power, uint32_t(mv.max_s * 1000), mv.dir * kick, 200);
+              if (!moving) mixer_control::move_active() = false;
             }
           }
 
           // --- Reporting ---
-          if (pz.known()) {
-            float pct = pz.position() * 100;
+          if (pz.known() && pc.stroke_x > 0) {
+            float pct = pz.opening(pc) * 100;
             if (!id(mixer_opening).has_state() || std::fabs(id(mixer_opening).state - pct) >= 1)
               id(mixer_opening).publish_state(pct);
           }
@@ -613,7 +667,7 @@ interval:
             case mixer_control::PosMode::CAL_RETURN: st = "Calibrating"; break;
             default:
               if (pz.cal_failed()) st = "Cal failed";
-              else if (automatic && pc.stroke_s <= 0) st = "Not calibrated";
+              else if (automatic && pc.stroke_x <= 0) st = "Not calibrated";
           }
           if (c.over_temp()) st = "Over-temp";
           if (id(heating_status).state != st) id(heating_status).publish_state(st);

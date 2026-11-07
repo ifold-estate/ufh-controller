@@ -32,12 +32,11 @@ static const uint8_t SCS_REG_LOCK = 48;           // 0 = EEPROM writes persist, 
 static const uint8_t SCS_REG_MOVING = 66;
 static const uint8_t SCS_REG_PRESENT_CURRENT = 69;  // 2 bytes, bit 15 = sign
 
-// Result of a timed motor-mode run (see start_run).
+// Result of a motor-mode run (see start_run).
 struct RunResult {
-  uint32_t ms{0};          // how long it actually drove
-  bool stalled{false};     // stopped because the current stayed over the stall threshold
+  uint32_t ms{0};          // how long it drove (not counting the coast afterwards)
+  bool stopped{false};     // ended by the stop check rather than the time limit
   bool failed{false};      // lost contact with the servo during the run
-  int peak_current{0};     // highest |current| seen (raw units)
 };
 
 class SCSServo : public PollingComponent, public uart::UARTDevice {
@@ -70,13 +69,19 @@ class SCSServo : public PollingComponent, public uart::UARTDevice {
   bool set_motor_mode(bool motor);
   // Motor mode drive: -1000..1000 (open-loop PWM duty, sign = direction). 0 stops.
   bool set_pwm(int duty);
-  // Drive at `duty` for up to `max_ms`, polling every 100 ms. Stops early if the current stays at or
-  // above `stall_current` (raw units; 0 = no stall detection). Every poll is logged at DEBUG.
-  bool start_run(int duty, uint32_t max_ms, int stall_current);
+  // Drive at `duty` for up to `max_ms`, starting with `kick_duty` for `kick_ms` (to break stiction),
+  // polling every 100 ms; then keep polling for 600 ms while the shaft coasts. Every poll is logged
+  // at DEBUG. is_running() stays true until the coast is over.
+  bool start_run(int duty, uint32_t max_ms, int kick_duty = 0, uint32_t kick_ms = 0);
   void stop_run();
-  // Optional: called every poll during a run with the drive direction (+1/-1); returning true ends
-  // the run as if stalled. For end-of-travel limit switches.
-  void set_end_check(std::function<bool(int)> f) { this->end_check_ = std::move(f); }
+  // Called with every position reading (runs, coasts and idle polls): the drive direction then
+  // (+1/-1 while driving or coasting, 0 when idle), seconds since the last reading, and whether the
+  // motor is being driven (false while coasting or idle).
+  void set_sample_callback(std::function<void(int raw, int dir, float dt, bool driving)> f) {
+    this->sample_cb_ = std::move(f);
+  }
+  // Polled during a run, after each sample: return true to stop driving now.
+  void set_stop_check(std::function<bool()> f) { this->stop_check_ = std::move(f); }
   bool is_running() const { return this->running_; }
   const RunResult &last_run() const { return this->last_run_; }
   bool set_goal_position(uint16_t position);
@@ -96,18 +101,19 @@ class SCSServo : public PollingComponent, public uart::UARTDevice {
   bool online_{false};
   uint32_t error_count_{0};
   std::string last_failure_;  // last logged failed-reply summary, to avoid repeating it
-  void finish_run_(bool stalled, bool failed);
+  void finish_run_(bool stopped, bool failed);
+  bool poll_motion_(int dir);  // read, log, feed the sample callback
 
   int last_position_{-1};
   float last_load_{0};
 
-  bool running_{false};
+  bool running_{false}, coasting_{false}, kicking_{false};
   int run_duty_{0};
-  uint32_t run_start_{0}, run_max_ms_{0}, last_poll_{0};
-  int run_stall_current_{0};
-  uint8_t stall_count_{0}, poll_failures_{0};
+  uint32_t run_start_{0}, run_max_ms_{0}, kick_ms_{0}, last_poll_{0}, last_sample_{0}, coast_start_{0};
+  uint8_t poll_failures_{0};
   RunResult run_{}, last_run_{};
-  std::function<bool(int)> end_check_;
+  std::function<void(int, int, float, bool)> sample_cb_;
+  std::function<bool()> stop_check_;
 
   sensor::Sensor *position_sensor_{nullptr};
   sensor::Sensor *speed_sensor_{nullptr};
