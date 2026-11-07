@@ -531,7 +531,7 @@ interval:
           static mixer_control::Positioner::Move mv;
           auto &c = mixer_control::instance();
           auto &pz = mixer_control::positioner();
-          auto &sv = id(mixer_servo);
+          auto *sv = id(mixer_servo);
           const bool automatic = id(mixer_auto).state, pump_on = id(relay2).state;
 
           // --- Controller, every 5 s ---
@@ -571,9 +571,9 @@ interval:
           if (automatic && !pz.known() && pz.mode() == mixer_control::PosMode::IDLE && pc.stroke_s > 0) pz.request_home();
           pump_was_on = pump_on;
 
-          if (moving && !sv.is_running()) {
+          if (moving && !sv->is_running()) {
             moving = false;
-            const auto &r = sv.last_run();
+            const auto &r = sv->last_run();
             if (r.failed) {
               pz.lost();
             } else {
@@ -587,15 +587,15 @@ interval:
               }
             }
           }
-          if (!sv.is_online()) {
-            if (sv.is_running()) sv.stop_run();
+          if (!sv->is_online()) {
+            if (sv->is_running()) sv->stop_run();
             pz.lost();
-          } else if (!moving && !sv.is_running()) {
+          } else if (!moving && !sv->is_running()) {
             // Control moves only in auto (over-temp drives the target to cold).
             const bool control = automatic && (c.over_temp() || pump_on);
             if (pz.next(c.opening(), control, pc, &mv)) {
               int duty = mv.dir * int(id(mixer_power).state * 10) * (id(mixer_reverse).state ? -1 : 1);
-              moving = sv.start_run(duty, uint32_t(mv.seconds * 1000), int(id(mixer_stall_current).state));
+              moving = sv->start_run(duty, uint32_t(mv.seconds * 1000), int(id(mixer_stall_current).state));
             }
           }
 
