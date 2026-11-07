@@ -164,6 +164,7 @@ bool SCSServo::start_run(int duty, uint32_t max_ms, int kick_duty, uint32_t kick
   this->kick_ms_ = kick_ms;
   this->run_duty_ = duty;
   this->run_start_ = this->last_poll_ = millis();
+  this->last_sample_ = this->run_start_;  // the first reading's dt covers driving time only
   this->run_max_ms_ = max_ms;
   this->poll_failures_ = 0;
   this->run_ = RunResult{};
