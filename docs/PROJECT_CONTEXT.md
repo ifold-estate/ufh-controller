@@ -440,16 +440,17 @@ band/setpoint stays lower, and the concrete floors filter brief peaks). Over-tem
 45 °C. Test scripts: backup 52 °C, curve climbs stop at 48 °C. Jon also turned the boiler's own
 maximum down one setting and will lower it further from the boiler-flow peaks we record.
 
-**Zone mapping (8 Nov, one relay at a time; Jon's notes):**
+**Zone and thermostat map (Jon, 8 Nov; supersedes the earlier one-relay-at-a-time notes):**
 
-| Relay | Solenoid (manifold circuit) | Floor area | Notes |
-|---|---|---|---|
-| 4 | 1 | – | **Not opening**: check wiring and/or replace the actuator |
-| 4 | 2 | Furthest coil at the end of the kitchen: pipe runs through the hall to the hob, then turns left towards the door | Working |
-| 5 | 9 and 10 | The two coils in the lounge: pipes run through the hall towards the under-stair cupboard | Working |
-| 6 | 5 and 6 | Kitchen, left-hand wall: one coil in the booth/dining area, one at the sink/hob. Notes on the wall by the manifold suggest 5 = sink/hob, 6 = booth/dining (unconfirmed) | Working |
-| 7 | 7 and 8 | The two coils in the playroom | Working |
-| 8 | 3 and 4 (by elimination) | to be confirmed | |
+| Thermostat | Input | Room | Relay | Manifold zones (solenoids) | Notes |
+|---|---|---|---|---|---|
+| T4, mechanical | DI1 (purple wire) | Playroom | 7 | 7, 8 | |
+| N1, Nest v1 | DI2 (pink) | Kitchen / conservatory | 8 | 2, 3 | |
+| N2, Nest v2 | DI3 (red) | Booth | 4 | 1, 6 | Zone 1's solenoid has failed (identified by elimination; cold corner); Jon may leave it open until replaced. Pipes to zones 2–5 run through this corridor |
+| N3, Nest v1 | DI4 (orange) | Lounge | 5 | 9, 10 | |
+| none | – | Kitchen centre (cooking area) | 6 | 4, 5 | Naturally warm, and pipes to 2 and 3 run underneath; left off for now ("Relay 6 mode"). A future virtual thermostat could average N1 and N2 |
+
+Floor plan with zones and thermostat positions: Jon's sketch of 8 Nov (not in the repo).
 
 **Zone 1 tests (8 Nov, pump on setting 3, only relay 4 open):**
 - Valve curve, rising part (CFH on): boiler-water share ~10–20 % at 0–5 %, ~24 % at ~10 %, 42 % at
