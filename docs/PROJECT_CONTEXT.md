@@ -440,6 +440,32 @@ band/setpoint stays lower, and the concrete floors filter brief peaks). Over-tem
 45 °C. Test scripts: backup 52 °C, curve climbs stop at 48 °C. Jon also turned the boiler's own
 maximum down one setting and will lower it further from the boiler-flow peaks we record.
 
+**Zone mapping (8 Nov, one relay at a time; Jon's notes):**
+
+| Relay | Solenoid (manifold circuit) | Floor area | Notes |
+|---|---|---|---|
+| 4 | 1 | – | **Not opening**: check wiring and/or replace the actuator |
+| 4 | 2 | Furthest coil at the end of the kitchen: pipe runs through the hall to the hob, then turns left towards the door | Working |
+| 5–8 | – | to be mapped | |
+
+**Zone 1 tests (8 Nov, pump on setting 3, only relay 4 open):**
+- Valve curve, rising part (CFH on): boiler-water share ~10–20 % at 0–5 %, ~24 % at ~10 %, 42 % at
+  15 %, 66 % at 21 %. Steeper than with all five zones (20 % at 15 % on 7 Nov): with one zone the
+  floor-side flow is restricted, so the boiler side dominates even more. **The curve depends on how
+  many zones are open.** The low end is noisy (return within a few °C of the mix).
+- With CFH off the upstream controller stops pushing boiler water to our branch: at the same
+  opening the share fell from 40 % to 8 %. So in free-wheel the valve draws far less hot water than
+  the curve predicts (safe direction; less leftover heat used than simulated).
+- The board's cut-out tripped twice during curve climbs (45 °C, then 50 °C after the limit was
+  raised); curve climbs should stop at ~46–47 °C.
+- **Band control (35–42 °C) on zone 1, from 10:08:** regular ~12 min cycles (~6 min heating,
+  ~6 min free-wheel), mix 34.9–42.4 °C, boiler flow peak 52.8 → 55.9 °C, no faults. Servo ~60
+  moves/h (not the ~9/h simulated): in free-wheel the valve target follows the cooling boiler and
+  moves at every 3 % drift. Improvement: re-set the valve only at phase changes and on large drift.
+- Jon raised the boiler thermostat by half a step at 12:22 (hot water needs > 60 °C).
+- Cam inputs still glitch (all four off for 0.2–0.4 s, about every second at the cold end): loose
+  common/supply suspected; wiring check pending. Firmware: treat "all off" as no signal.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
