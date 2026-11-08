@@ -467,6 +467,18 @@ maximum down one setting and will lower it further from the boiler-flow peaks we
 - Cam inputs still glitch (all four off for 0.2–0.4 s, about every second at the cold end): loose
   common/supply suspected; wiring check pending. Firmware: treat "all off" as no signal.
 
+**Upstream timing chain (measured by Jon, 8 Nov):** our CFH drives a classic **2-port zone valve**
+between the boiler and the UFH branch directly. It takes ~15 s to open, then its end switch gives an
+interim CFH to an upstream controller that merges radiators, hot water and towel radiators. That
+controller waits **3 min 50 s**, then fires the boiler and its pump; water reaches our boiler-flow
+probe ~20 s later: **~4 min 25 s from our CFH to hot water**. When our CFH drops, the 2-port valve
+closes and our branch stops within seconds. Consequences seen in the HA plots: the mix keeps falling
+for ~4 min after CFH on, then rises steeply (narrow valve range); band control ended the phase at
+42 °C within about a minute, so a ~5 min call delivered < 1 min of heat. "Free-wheel" uses no leftover
+boiler heat (the branch is shut). Ideas (not implemented): end the heating phase on the return
+temperature or a minimum flow time instead of the mix; let the valve hold the mix under the band
+top as a ceiling during heating; detect real flow start from the boiler-probe upturn.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
