@@ -429,6 +429,12 @@ CFH also off at "Boiler cap temperature" (50 °C) until "restart below" (10 °C)
 Heating / Boiler cap / Free-wheel. The over-temperature cut-out still overrides everything.
 Includes v0.7 (valve curve, cam debounce, no hunting).
 
+**Pump speed (8 Nov):** Jon is moving the floor circulation pump from setting 2 to **3**, to reduce
+the boiler side's dominance through the mixer (better valve authority) and to even out the floor
+loops. The valve curve of 7 Nov was measured at setting 2; re-measure it at setting 3 (longer
+steps, steadier boiler, both directions) and update `valve::CURVE`. Until then, if setting 3 makes
+the valve less boiler-dominated, the old curve errs on the cool (safe) side.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
