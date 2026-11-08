@@ -489,8 +489,13 @@ auto off, valve at 40 %, pump on (zone 6), CFH on at t = 0 after 90 s off:
   37 → 49 °C (guard closed the valve and dropped CFH at 48.9 °C; hot slug peaked 52.2 °C at the probe,
   board's 50 °C latch held CFH off). So the valve must close sharply the moment the pump starts
   (detect a ~3 °C/10 s rise in the mix, or the boiler-probe upturn).
-- To test: CFH pulses shorter than 3 min 50 s may pull stored boiler heat without starting the
-  boiler pump or burner, if the upstream timer resets when the call drops (Jon to watch the boiler).
+- **Short-pulse test (8 Nov, 15:04): confirmed.** Valve 61 %, CFH on 3 min, off 1 min, on 3 min (zone
+  7, and 6 for part). The 2-port valve opens in ~15 s and closes within ~2 s (spring return). **The
+  boiler and its pump never started**: the upstream controller's 3 min 50 s timer resets when the
+  call drops. Pulse 1: boiler water at ~64 °C throughout, mix 25 → 44 °C (~50 % boiler water from
+  our pump alone at 61 %). Pulse 2: water from the boiler fell 61 → 50 °C as its stored heat ran out;
+  mix peaked 44 °C. So repeated calls under ~3.5 min pull the boiler's stored heat for free (no
+  pump, no burner), roughly two pulses' worth after the boiler has been hot.
 
 **Commissioning (servo on the valve, Mixer auto off):**
 
