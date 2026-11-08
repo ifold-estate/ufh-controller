@@ -332,26 +332,34 @@ binary_sensor:
     id: di1
     name: "Input 1"
     pin: { number: GPIO4, inverted: true, mode: { input: true, pullup: true } }
-    # Thermostat (24 Vac): the opto drops out at every zero crossing, so stay ON through gaps (1 s)
-    filters: [delayed_on: 100ms, delayed_off: 1s]
+    # Thermostat (24 Vac): the opto drops out at every zero crossing. Bridge the gaps first (stay ON
+    # through any gap < 1 s), then require 0.5 s steady. (The reverse order let only the odd sampling
+    # beat through, so calling inputs flickered ~1 s on / 1 s off.)
+    filters: [delayed_off: 1s, delayed_on: 500ms]
   - platform: gpio
     id: di2
     name: "Input 2"
     pin: { number: GPIO5, inverted: true, mode: { input: true, pullup: true } }
-    # Thermostat (24 Vac): the opto drops out at every zero crossing, so stay ON through gaps (1 s)
-    filters: [delayed_on: 100ms, delayed_off: 1s]
+    # Thermostat (24 Vac): the opto drops out at every zero crossing. Bridge the gaps first (stay ON
+    # through any gap < 1 s), then require 0.5 s steady. (The reverse order let only the odd sampling
+    # beat through, so calling inputs flickered ~1 s on / 1 s off.)
+    filters: [delayed_off: 1s, delayed_on: 500ms]
   - platform: gpio
     id: di3
     name: "Input 3"
     pin: { number: GPIO6, inverted: true, mode: { input: true, pullup: true } }
-    # Thermostat (24 Vac): the opto drops out at every zero crossing, so stay ON through gaps (1 s)
-    filters: [delayed_on: 100ms, delayed_off: 1s]
+    # Thermostat (24 Vac): the opto drops out at every zero crossing. Bridge the gaps first (stay ON
+    # through any gap < 1 s), then require 0.5 s steady. (The reverse order let only the odd sampling
+    # beat through, so calling inputs flickered ~1 s on / 1 s off.)
+    filters: [delayed_off: 1s, delayed_on: 500ms]
   - platform: gpio
     id: di4
     name: "Input 4"
     pin: { number: GPIO7, inverted: true, mode: { input: true, pullup: true } }
-    # Thermostat (24 Vac): the opto drops out at every zero crossing, so stay ON through gaps (1 s)
-    filters: [delayed_on: 100ms, delayed_off: 1s]
+    # Thermostat (24 Vac): the opto drops out at every zero crossing. Bridge the gaps first (stay ON
+    # through any gap < 1 s), then require 0.5 s steady. (The reverse order let only the odd sampling
+    # beat through, so calling inputs flickered ~1 s on / 1 s off.)
+    filters: [delayed_off: 1s, delayed_on: 500ms]
   - platform: gpio
     id: di5
     name: "Input 5"
