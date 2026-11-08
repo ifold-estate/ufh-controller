@@ -74,6 +74,7 @@ struct Settings {
   float cap_temp = 50;
   float cap_restart = 10;      // ...and call again this far below it
   float cap_overshoot = 8;     // the boiler keeps heating ~2 min after CFH drops
+  float band_reset = 0.08f;    // re-open the valve only when its ideal opening is this much higher
   float boiler_expect_rise = 20;  // °C over setpoint the boiler is assumed to reach while it warms
 };
 
@@ -238,15 +239,23 @@ class Controller {
     if (!std::isnan(in.boiler) && !std::isnan(in.ret)) {
       float hot = heat_ ? (cfg.cap ? cfg.cap_temp + cfg.cap_overshoot : cfg.boiler_max) : in.boiler;
       hot = std::max({hot, in.boiler, in.ret + 3});
-      share_ = std::clamp((cfg.band_high - in.ret) / (hot - in.ret), 0.0f, 1.0f);
-      opening_ = cfg.valve_curve ? valve::opening(share_) : share_;
+      const float share = std::clamp((cfg.band_high - in.ret) / (hot - in.ret), 0.0f, 1.0f);
+      const float open = cfg.valve_curve ? valve::opening(share) : share;
+      // Re-set the valve at each phase change, when it would need to close (never let the mix run
+      // hot), or when the opening it should have has drifted a lot; otherwise leave it (8 Nov: following
+      // every small drift moved the servo ~60 times an hour).
+      if (heat_ != band_heat_was_ || open < opening_ - 0.01f || std::fabs(open - opening_) > cfg.band_reset) {
+        share_ = share;
+        opening_ = open;
+      }
     }
+    band_heat_was_ = heat_;
     running_ = true;
     status_ = !heat_ ? Status::FREE_WHEEL : cap_off_ ? Status::BOILER_CAP : Status::HEATING;
     return true;
   }
 
-  bool cfh_ = false, heat_ = false, cap_off_ = false, band_started_ = false;
+  bool cfh_ = false, heat_ = false, cap_off_ = false, band_started_ = false, band_heat_was_ = false;
   float opening_ = 0;
   float share_ = 0;     // boiler-water share asked for
   float integral_ = 0;  // °C·s
@@ -490,6 +499,8 @@ class Positioner {
   // position (for logging), or nullptr.
   const char *cam(uint8_t state) {
     use_cam_ = true;
+    // All four off never happens on the cam: it's the switches' common or supply dropping out.
+    if (state == 0) return nullptr;
     const char *note = nullptr;
     // A change counts only once it has held for two readings (wiring blips last one reading or so);
     // the shaft's movement since the first sighting is kept when snapping to the edge.
