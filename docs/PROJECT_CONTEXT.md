@@ -452,6 +452,15 @@ maximum down one setting and will lower it further from the boiler-flow peaks we
 
 Floor plan with zones and thermostat positions: Jon's sketch of 8 Nov (not in the repo).
 
+**v1.0, thermostat-driven heating (`heating_demand.h`):** "Heating auto" (off by default) lets the
+thermostats drive everything: each zone valve opens while its thermostat calls (openings 30 s apart),
+the floor pump runs once a valve has been open 2 min (actuator time), CFH is allowed only while
+some thermostat calls (the mixer controller, normally Staged, still decides when), and when the last
+call ends CFH drops, the pump runs on 3 min with the valves as they are, then the valves close 10 s
+after the pump stops. Turning Heating auto on turns Mixer auto on; turning it off drops CFH and
+leaves valves and pump for manual control. "Relay 6 mode": Off (default) / Follow N1 / Follow N1 or
+N2 / Always on. LCD zone dots follow the map. Unit-tested in `tools/mixer_sim/sim.cpp`.
+
 **Zone 1 tests (8 Nov, pump on setting 3, only relay 4 open):**
 - Valve curve, rising part (CFH on): boiler-water share ~10–20 % at 0–5 %, ~24 % at ~10 %, 42 % at
   15 %, 66 % at 21 %. Steeper than with all five zones (20 % at 15 % on 7 Nov): with one zone the

@@ -22,6 +22,7 @@ esphome:
     - mixer_control.h   # mixed-flow control and over-temperature cut-out (test: tools/mixer_sim)
     - cam_gpio.h        # raw cam switch levels (DI5-8)
     - lcd_reset.h       # re-initialise the LCD without a restart
+    - heating_demand.h  # thermostats -> zone valves and pump (test: tools/mixer_sim)
   on_boot:
     - priority: 800   # before the display's setup: keep its init sequence for "LCD reset"
       then:
@@ -226,6 +227,18 @@ switch:
             ESP_LOGI("mixer", "Mixer auto off: boiler CFH off");
             id(relay1).turn_off();
           }
+  # Thermostats drive the heating: zone valves, pump (and, via the mixer controller, CFH). Off by
+  # default; while on, manual relay changes are put back. Turning it off drops CFH and leaves the
+  # valves and pump as they are, for manual control.
+  - platform: template
+    id: heating_auto
+    name: "Heating auto"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: 'if (!id(mixer_auto).state) id(mixer_auto).turn_on();'
+    turn_off_action:
+      - lambda: 'if (id(relay1).state) id(relay1).turn_off();'
   # Band mode: also drop CFH when the boiler flow reaches "Boiler cap" (off by default).
   - platform: template
     id: boiler_cap_on
@@ -246,6 +259,15 @@ switch:
 # Staged: heating starts at "Band low"; free short pulses use the boiler's stored heat, then one
 # full call holds the mix under "Band high" until the return reaches "Return target".
 select:
+  # Relay 6 (kitchen centre, zones 4 and 5) has no thermostat of its own.
+  - platform: template
+    id: relay6_mode
+    name: "Relay 6 mode"
+    options: ["Off", "Follow N1", "Follow N1 or N2", "Always on"]
+    initial_option: "Off"
+    optimistic: true
+    restore_value: true
+    entity_category: config
   - platform: template
     id: mixer_mode
     name: "Mixer mode"
@@ -722,8 +744,10 @@ display:
       st.boiler_on = id(relay1).state;
       st.floor_pump_on = id(relay2).state;
       // Zone valves on relays 4-8; which dot is which room is provisional until the zones are mapped.
-      switch_::Switch *zones[5] = {id(relay4), id(relay5), id(relay6), id(relay7), id(relay8)};
-      for (int i = 0; i < 5; i++) st.zone[i] = zones[i]->state;
+      // Zone dots by room (8 Nov map): Playroom relay 7; Kitchen relays 8 and 6; Booth relay 4 (two
+      // zones); Lounge relay 5.
+      switch_::Switch *zones[6] = {id(relay7), id(relay8), id(relay6), id(relay4), id(relay4), id(relay5)};
+      for (int i = 0; i < 6; i++) st.zone[i] = zones[i]->state;
       // DI1-4: thermostats in Playroom, Kitchen, Booth, Lounge (on = calling for heat)
       binary_sensor::BinarySensor *stats[4] = {id(di1), id(di2), id(di3), id(di4)};
       for (int i = 0; i < 4; i++) st.room_calling[i] = stats[i]->state;
@@ -754,6 +778,32 @@ interval:
     then:
       - lambda: |-
           if (!id(mixer_servo).is_running()) lcd_reset::reinit(id(lcd));
+
+  # Thermostat demand (heating_demand.h): zone valves and pump, every second, while Heating auto is on.
+  - interval: 1s
+    then:
+      - lambda: |-
+          if (!id(heating_auto).state) return;
+          auto &d = heating_demand::instance();
+          heating_demand::Settings ds;
+          ds.r6 = heating_demand::R6Mode(id(relay6_mode).active_index().value_or(0));
+          const bool calls[4] = {id(di1).state, id(di2).state, id(di3).state, id(di4).state};
+          d.update(calls, 1.0f, ds);
+          auto set = [](switch_::Switch *r, bool on, const char *name) {
+            if (r->state == on) return;
+            ESP_LOGI("demand", "%s %s", name, on ? "on" : "off");
+            if (on) r->turn_on(); else r->turn_off();
+          };
+          set(id(relay4), d.valve(heating_demand::R4), "Zone valve relay 4 (booth)");
+          set(id(relay5), d.valve(heating_demand::R5), "Zone valve relay 5 (lounge)");
+          set(id(relay6), d.valve(heating_demand::R6), "Zone valve relay 6 (kitchen centre)");
+          set(id(relay7), d.valve(heating_demand::R7), "Zone valve relay 7 (playroom)");
+          set(id(relay8), d.valve(heating_demand::R8), "Zone valve relay 8 (kitchen)");
+          set(id(relay2), d.pump(), "Floor pump");
+          if (!d.active() && id(relay1).state) {  // no thermostat calling: no CFH
+            ESP_LOGI("demand", "No call: boiler CFH off");
+            id(relay1).turn_off();
+          }
 
   # Mixed-flow control and over-temperature cut-out (mixer_control.h). The positioner runs every
   # second (servo moves are timed runs); the controller every 5 s.
@@ -799,7 +849,8 @@ interval:
 
             // Band/staged mode in auto: the controller switches CFH (off whenever the pump is off).
             if (automatic && (cfg.band || cfg.staged)) {
-              const bool want = pump_on && c.cfh();
+              // With Heating auto, only while some thermostat calls.
+              const bool want = pump_on && c.cfh() && (!id(heating_auto).state || heating_demand::instance().active());
               if (want != id(relay1).state) {
                 ESP_LOGI("mixer", "%s: boiler CFH %s (%s, mix %.1f °C, boiler %.1f °C)", cfg.staged ? "Staged" : "Band", want ? "on" : "off",
                          mixer_control::status_text(c.status()), in.mixed, in.boiler);

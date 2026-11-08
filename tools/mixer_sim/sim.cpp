@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <deque>
 #include "../../mixer_control.h"
+#include "../../heating_demand.h"
 
 using namespace mixer_control;
 
@@ -306,6 +307,39 @@ void safety_checks() {
     assert(c.opening() < o);                               // stepped down
     for (int i = 0; i < 200; i++) step(60, 41, 33.5f);     // return reaches target after >= 15 min
     assert(!c.cfh() && c.status() == Status::FREE_WHEEL);
+  }
+  // Thermostat demand: staggered valves, pump after the actuators open, overrun, relay 6 modes.
+  {
+    using heating_demand::Demand; using heating_demand::R6Mode;
+    using heating_demand::R4; using heating_demand::R5; using heating_demand::R6; using heating_demand::R7; using heating_demand::R8;
+    heating_demand::Settings ds;
+    Demand d;
+    bool calls[4] = {false, false, false, false};
+    auto run_for = [&](float sec) { for (int i = 0; i < int(sec); i++) d.update(calls, 1, ds); };
+    run_for(5);
+    assert(!d.pump() && !d.active() && !d.valve(R4) && !d.valve(R7));
+    calls[0] = calls[3] = true;  // playroom and lounge call
+    run_for(1);
+    assert(d.valve(R7) != d.valve(R5));               // one valve at a time
+    run_for(30);
+    assert(d.valve(R7) && d.valve(R5));               // the second after the stagger
+    assert(!d.pump());                                 // actuators still opening
+    run_for(95);
+    assert(d.pump());                                  // 2 min after the first opened
+    calls[0] = false;                                  // playroom satisfied, lounge still calling
+    run_for(1);
+    assert(!d.valve(R7) && d.valve(R5) && d.pump());
+    calls[3] = false;                                  // last call ends: overrun, valves stay open
+    run_for(1);
+    assert(d.pump() && d.valve(R5) && !d.active() && d.overrun());
+    run_for(180);
+    assert(!d.pump() && d.valve(R5));                  // pump stopped, valve closes 10 s later
+    run_for(11);
+    assert(!d.valve(R5));
+    ds.r6 = R6Mode::N1_OR_N2;                          // kitchen centre follows N1 or N2
+    calls[2] = true;
+    run_for(40);
+    assert(d.valve(R4) && d.valve(R6) && !d.valve(R8));
   }
   printf("safety checks passed\n\n");
 }
