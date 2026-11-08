@@ -344,6 +344,24 @@ void safety_checks() {
     run_for(40);
     assert(d.valve(R4) && d.valve(R6) && !d.valve(R8));
   }
+  // On the cold end switch, with the estimate drifted a few % open: no more closing moves (8 Nov 19:47).
+  {
+    Positioner pz;
+    PosConfig pc;
+    pc.cold_x = -75;
+    pc.stroke_x = 1956;
+    pz.cam(cam::COLD_END);
+    pz.cam(cam::COLD_END);
+    pz.request_home();
+    Positioner::Move m;
+    assert(pz.next(0, true, pc, &m) && m.dir < 0);
+    pz.done(m, true, 1000, &pc);
+    assert(pz.known());
+    pz.tracker().set(120);  // drifted: the estimate says ~10 % open
+    assert(pz.opening(pc) > 0.05f);
+    for (int i = 0; i < 50; i++) assert(!pz.next(0, true, pc, &m));
+    assert(pz.next(0.5f, true, pc, &m) && m.dir > 0);  // opening still works
+  }
   printf("safety checks passed\n\n");
 }
 

@@ -756,6 +756,10 @@ class Positioner {
     if (std::fabs(target - now) < c.deadband) return false;
     // Targets at the ends: drive into the end (re-syncs at the hot end, pushes the cold end shut).
     const int dir = target > now ? 1 : -1;
+    // Already on that end's switch: there is no further to go (a move would stop at once). Near the
+    // cold end the reading drifts in the sensor gap after a stop, and the estimate could wander a
+    // few % open; without this the valve was "closed" over and over for 30 s (8 Nov, 19:47).
+    if (use_cam_ && cam_end(dir)) return false;
     // Don't reverse straight back after a move unless clearly needed: the smallest move (kick plus
     // coast) can be bigger than the deadband, which otherwise hunts between two positions.
     // Only reversals towards hot are held back: closing (towards cold) is never delayed.
