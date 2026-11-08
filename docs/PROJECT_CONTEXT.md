@@ -497,6 +497,24 @@ auto off, valve at 40 %, pump on (zone 6), CFH on at t = 0 after 90 s off:
   mix peaked 44 °C. So repeated calls under ~3.5 min pull the boiler's stored heat for free (no
   pump, no burner), roughly two pulses' worth after the boiler has been hot.
 
+**Two-stage heating phase (simulated 8 Nov, `tools/mixer_sim/stage_sim.py`, `docs/stage_sim.png`):**
+plant from the 8 Nov measurements (2-port valve 15 s / 2 s, upstream timer 3 min 50 s that resets,
+pulled vs pumped valve curves, stored boiler heat, burner + thermostat 52/62 °C, branch probe that
+cools when idle). 8 h, single zone:
+
+| | heat | free (stored) | CFH calls/h | boiler-pump & burner starts/h | burner h | servo moves/h | mix | > 45 °C |
+|---|---|---|---|---|---|---|---|---|
+| current band | 98 | 2 % | 11 | ~11 | 1.1 | 54 | 26–47 | 59 s |
+| two-stage | 151 | 26 % | 2 | 2 | 1.6 | 60 | 29–45 | 52 s |
+
+Two-stage: heating starts below 35 °C mix; pulses of 3 min 15 s (under the timer), 30 s apart, valve
+aimed at ~41 °C on the pulled curve, while the boiler water arriving is > return + 8 °C; then one full
+call: valve 61 % while waiting, close to the pumped setting when the mix rises > 0.15 °C/s (pump
+start), coarse ceiling 38–43 °C (≤ 1 step / 30 s), end when the return reaches 33 °C after ≥ 15 min.
+~50 % more heat with a fifth of the boiler starts; a quarter of the heat comes from stored heat for
+free. Band control (with the firmware's five-zone curve on a single zone) reproduces the short
+cycles and overshoots seen on 8 Nov.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
