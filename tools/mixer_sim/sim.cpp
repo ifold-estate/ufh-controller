@@ -290,7 +290,10 @@ void safety_checks() {
     assert(c.cfh() && c.status() == Status::PULSING);
     // pulled curve aiming at 41 °C: share (41-28)/(60-28) = 0.41 -> opening ~0.52
     assert(c.opening() > 0.45f && c.opening() < 0.58f);
-    for (int i = 0; i < 39; i++) step(58, 38, 29);         // 195 s: the pulse ends
+    // The boiler pump starts for another system during the pulse: mix +1.5 °C in 5 s.
+    { const float before = c.opening(); step(60, 36.5f, 29); step(60, 38, 29);
+      assert(c.opening() < before - 0.15f); }                // straight onto the pumped curve
+    for (int i = 0; i < 37; i++) step(58, 38, 29);         // 195 s: the pulse ends
     assert(!c.cfh() && c.status() == Status::PULSING);     // in the 30 s gap
     for (int i = 0; i < 6; i++) step(55, 37, 29);          // gap over, boiler still warm: next pulse
     assert(c.cfh() && c.status() == Status::PULSING);

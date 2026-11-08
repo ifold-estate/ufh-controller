@@ -685,6 +685,22 @@ sensor:
     unit_of_measurement: "%"
     accuracy_decimals: 0
     update_interval: never   # published by the control loop
+  # Boiler-water share of the mixed flow, measured: (mixed - return) / (boiler - return). Only while
+  # CFH is on (zone valve open) and the boiler water is clearly hotter than the return; otherwise
+  # the boiler probe sits in still water, so it reads unknown.
+  - platform: template
+    id: mixer_hot_share
+    name: "Mixer hot share"
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never   # published by the control loop
+  # What the controller expects at its current opening, from the valve curve it is using.
+  - platform: template
+    id: mixer_target_share
+    name: "Mixer target share"
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: never   # published by the control loop
 
   - platform: uptime
     name: "Uptime"
@@ -932,6 +948,20 @@ interval:
             float pct = pz.opening(pc) * 100;
             if (!id(mixer_opening).has_state() || std::fabs(id(mixer_opening).state - pct) >= 1)
               id(mixer_opening).publish_state(pct);
+          }
+          {
+            const float m = id(temp_mixed_flow).state, r = id(temp_return).state, b = id(temp_boiler_flow).state;
+            float hot = NAN, tgt = NAN;
+            if (id(relay1).state && !std::isnan(m) && !std::isnan(r) && !std::isnan(b) && b - r > 3)
+              hot = std::clamp((m - r) / (b - r), 0.0f, 1.0f) * 100;
+            if (automatic) tgt = c.share() * 100;
+            auto pub = [](sensor::Sensor *s, float v) {
+              if (std::isnan(v) ? s->has_state() && !std::isnan(s->state)
+                                : !s->has_state() || std::isnan(s->state) || std::fabs(s->state - v) >= 1)
+                s->publish_state(v);
+            };
+            pub(id(mixer_hot_share), hot);
+            pub(id(mixer_target_share), tgt);
           }
           const char *st = mixer_control::status_text(c.status());
           switch (pz.mode()) {

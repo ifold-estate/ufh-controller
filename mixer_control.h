@@ -61,6 +61,13 @@ inline float opening(float share) {
 constexpr Pt PULLED[] = {{0.00f, 0.00f}, {0.20f, 0.05f}, {0.40f, 0.22f}, {0.61f, 0.50f}, {0.80f, 0.60f}, {1.00f, 0.65f}};
 constexpr Pt PUMPED[] = {{0.00f, 0.10f}, {0.05f, 0.15f}, {0.10f, 0.24f}, {0.15f, 0.42f}, {0.21f, 0.66f},
                          {0.30f, 0.85f}, {0.40f, 0.95f}, {1.00f, 1.00f}};
+template<size_t M> float share_on(const Pt (&c)[M], float opening) {
+  if (opening <= c[0].opening) return c[0].share;
+  for (size_t i = 1; i < M; i++)
+    if (opening <= c[i].opening)
+      return c[i - 1].share + (opening - c[i - 1].opening) / (c[i].opening - c[i - 1].opening) * (c[i].share - c[i - 1].share);
+  return c[M - 1].share;
+}
 template<size_t M> float opening_on(const Pt (&c)[M], float share) {
   if (share <= c[0].share) return c[0].opening;
   for (size_t i = 1; i < M; i++)
@@ -323,7 +330,19 @@ class Controller {
           }
         }
         cfh_ = stage_t_ < cfg.pulse_s;
-        if (cfh_) {
+        if (stage_t_ == 0 || !cfh_) pulse_pumped_ = false;
+        // Another system (radiators, hot water) may start the boiler pump while our zone valve is open:
+        // the mix then rises fast, as at a full call's pump start (8 Nov: 51.6 °C at a pulled-curve
+        // opening). Go straight onto the pumped curve for the rest of the pulse.
+        if (cfh_ && !pulse_pumped_ && rate >= cfg.pump_rate) {
+          pulse_pumped_ = true;
+          opening_ = valve::opening_on(valve::PUMPED, std::clamp(aim_share(std::max(in.boiler, 55.0f)), 0.0f, 1.0f));
+          last_adjust_ = stage_t_;
+        }
+        if (cfh_ && pulse_pumped_) {  // pumped: the coarse ceiling, as in a full call
+          if (in.mixed > ceiling + 2) opening_ = std::max(0.0f, opening_ - 0.03f);
+          else if (stage_t_ - last_adjust_ >= 30 && in.mixed > ceiling) { opening_ = std::max(0.0f, opening_ - 0.03f); last_adjust_ = stage_t_; }
+        } else if (cfh_) {
           // Aim for the boiler water now arriving, but assume it's at least 60 °C: after an idle spell
           // our probe's pipe has cooled and reads low until the first water arrives (8 Nov: read 44,
           // water was 58 °C, valve opened fully, mix 47 °C).
@@ -363,7 +382,11 @@ class Controller {
         }
         break;
     }
-    share_ = opening_;  // (reporting only)
+    // Reporting: the boiler-water share expected at this opening, on the curve that applies now
+    // (pulled while the boiler pump is off, pumped once it runs); 0 while the branch is shut.
+    share_ = !cfh_ ? 0.0f
+           : (stage_ == Stage::CALL || (stage_ == Stage::PULSE && pulse_pumped_)) ? valve::share_on(valve::PUMPED, opening_)
+           : valve::share_on(valve::PULLED, opening_);
     running_ = true;
     status_ = stage_ == Stage::IDLE ? Status::FREE_WHEEL
             : stage_ == Stage::PULSE ? Status::PULSING
@@ -373,6 +396,7 @@ class Controller {
 
   Stage stage_ = Stage::IDLE;
   float stage_t_ = 0, call_t_ = 0, last_adjust_ = 0, last_mixed_ = NAN;
+  bool pulse_pumped_ = false;
 
   bool cfh_ = false, heat_ = false, cap_off_ = false, band_started_ = false, band_heat_was_ = false;
   float opening_ = 0;
