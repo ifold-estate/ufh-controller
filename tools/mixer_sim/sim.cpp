@@ -273,6 +273,40 @@ void safety_checks() {
     step(80, 46, 30);
     assert(!c.cfh() && c.over_temp());                      // safety still wins
   }
+  // Staged mode: pulses while stored heat lasts, then a full call; pump start closes the valve.
+  {
+    Settings cfg;
+    cfg.staged = true;  // band_low 35, band_high 42, ret_target 33, pulse 195 s, gap 30 s
+    Controller c;
+    auto step = [&](float boiler, float mixed, float ret, float dt = 5) {
+      Inputs in;
+      in.boiler = boiler; in.mixed = mixed; in.ret = ret; in.pump_on = true; in.automatic = true; in.dt = dt;
+      c.update(in, cfg);
+    };
+    step(60, 40, 28);
+    assert(!c.cfh() && c.status() == Status::FREE_WHEEL);
+    step(60, 34.9, 28);                                    // bottom of the band: start pulsing
+    assert(c.cfh() && c.status() == Status::PULSING);
+    // pulled curve aiming at 41 °C: share (41-28)/(60-28) = 0.41 -> opening ~0.52
+    assert(c.opening() > 0.45f && c.opening() < 0.58f);
+    for (int i = 0; i < 39; i++) step(58, 38, 29);         // 195 s: the pulse ends
+    assert(!c.cfh() && c.status() == Status::PULSING);     // in the 30 s gap
+    for (int i = 0; i < 6; i++) step(55, 37, 29);          // gap over, boiler still warm: next pulse
+    assert(c.cfh() && c.status() == Status::PULSING);
+    for (int i = 0; i < 39; i++) step(40, 36, 33.0f - 0.5f);  // boiler water now only ~7.5 over return
+    for (int i = 0; i < 6; i++) step(36, 35, 32);
+    assert(c.cfh() && c.status() == Status::CALL_WAIT);    // stored heat used up: full call
+    assert(std::fabs(c.opening() - cfg.wait_open) < 0.04f);
+    step(37, 35.5, 32);
+    step(45, 37.0, 32);                                    // +1.5 °C in 5 s = 0.3 °C/s: boiler pump
+    assert(c.status() == Status::CALLING);
+    assert(c.opening() < 0.25f);                           // closed sharply onto the pumped curve
+    const float o = c.opening();
+    for (int i = 0; i < 7; i++) step(62, 44, 30);          // over the 43 °C ceiling for 35 s
+    assert(c.opening() < o);                               // stepped down
+    for (int i = 0; i < 200; i++) step(60, 41, 33.5f);     // return reaches target after >= 15 min
+    assert(!c.cfh() && c.status() == Status::FREE_WHEEL);
+  }
   printf("safety checks passed\n\n");
 }
 

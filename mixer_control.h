@@ -55,6 +55,21 @@ inline float opening(float share) {
     if (CURVE[i].share >= CURVE[N - 1].share) return CURVE[i].opening;
   return 1;
 }
+// Measured 8 Nov 2026 with one zone open. "Pulled": 2-port zone valve open but the boiler pump not
+// running, so only our pump draws boiler water. "Pumped": the boiler pump running (steeper than the
+// five-zone CURVE above; used as the conservative case).
+constexpr Pt PULLED[] = {{0.00f, 0.00f}, {0.20f, 0.05f}, {0.40f, 0.22f}, {0.61f, 0.50f}, {0.80f, 0.60f}, {1.00f, 0.65f}};
+constexpr Pt PUMPED[] = {{0.00f, 0.10f}, {0.05f, 0.15f}, {0.10f, 0.24f}, {0.15f, 0.42f}, {0.21f, 0.66f},
+                         {0.30f, 0.85f}, {0.40f, 0.95f}, {1.00f, 1.00f}};
+template<size_t M> float opening_on(const Pt (&c)[M], float share) {
+  if (share <= c[0].share) return c[0].opening;
+  for (size_t i = 1; i < M; i++)
+    if (share <= c[i].share)
+      return c[i].share > c[i - 1].share
+                 ? c[i - 1].opening + (share - c[i - 1].share) / (c[i].share - c[i - 1].share) * (c[i].opening - c[i - 1].opening)
+                 : c[i - 1].opening;
+  return c[M - 1].opening;
+}
 }  // namespace valve
 
 struct Settings {
@@ -75,6 +90,20 @@ struct Settings {
   float cap_restart = 10;      // ...and call again this far below it
   float cap_overshoot = 8;     // the boiler keeps heating ~2 min after CFH drops
   float band_reset = 0.08f;    // re-open the valve only when its ideal opening is this much higher
+  // Staged mode (simulated 8 Nov 2026, tools/mixer_sim/stage_sim.py): the heating phase starts at
+  // band_low and ends when the return reaches ret_target. First free pulses: CFH calls shorter than
+  // the upstream controller's 3 min 50 s timer (which resets when the call drops) open the 2-port
+  // valve so our pump pulls the boiler's stored heat without starting the boiler; then, once the
+  // boiler water arriving is no longer warm, one full call that waits with the valve open, closes
+  // sharply when the boiler pump starts, and holds the mix under the ceiling (band_high).
+  bool staged = false;
+  float ret_target = 33;
+  float pulse_s = 195, gap_s = 30;
+  float stored_margin = 8;     // boiler water this much above the return still counts as stored heat
+  float wait_open = 0.61f;     // valve while the full call waits for the boiler pump
+  float pump_rate = 0.15f;     // mix rising this fast (°C/s) = the boiler pump has started
+  float max_wait_s = 300;
+  float min_call_s = 900;
   float boiler_expect_rise = 20;  // °C over setpoint the boiler is assumed to reach while it warms
 };
 
@@ -88,6 +117,7 @@ struct Inputs {
 enum class Status : uint8_t {
   OFF, PUMP_OFF, PROBE_FAULT, OVER_TEMP, WAITING_BOILER, WARMING, HOLDING, COOLING,
   HEATING, BOILER_CAP, FREE_WHEEL,  // band mode
+  PULSING, CALL_WAIT, CALLING,      // staged mode
 };
 
 inline const char *status_text(Status s) {
@@ -103,6 +133,9 @@ inline const char *status_text(Status s) {
     case Status::HEATING: return "Heating";
     case Status::BOILER_CAP: return "Boiler cap";
     case Status::FREE_WHEEL: return "Free-wheel";
+    case Status::PULSING: return "Pulsing";
+    case Status::CALL_WAIT: return "Call (waiting)";
+    case Status::CALLING: return "Calling";
   }
   return "";
 }
@@ -127,6 +160,8 @@ class Controller {
       integral_ = 0;
       running_ = false;
       band_started_ = false;
+      stage_ = Stage::IDLE;
+      stage_ = Stage::IDLE;
       status_ = over_temp_ ? Status::OVER_TEMP : Status::OFF;
       return false;
     }
@@ -149,6 +184,7 @@ class Controller {
       return false;  // hold position, ready for the next start
     }
 
+    if (cfg.staged) return staged_(in, cfg);
     if (cfg.band) return band_(in, cfg);
 
     const float sp = cfg.setpoint;
@@ -254,6 +290,78 @@ class Controller {
     status_ = !heat_ ? Status::FREE_WHEEL : cap_off_ ? Status::BOILER_CAP : Status::HEATING;
     return true;
   }
+
+  // Staged mode.
+  enum class Stage : uint8_t { IDLE, PULSE, CALL_WAIT, CALL };
+  void set_open_(float o) {
+    o = std::clamp(o, 0.0f, 1.0f);
+    if (std::fabs(o - opening_) > 0.03f) opening_ = o;  // ignore what the positioner would ignore
+  }
+  bool staged_(const Inputs &in, const Settings &cfg) {
+    stage_t_ += in.dt;
+    const float rate = std::isnan(last_mixed_) || in.dt <= 0 ? 0 : (in.mixed - last_mixed_) / in.dt;
+    last_mixed_ = in.mixed;
+    const bool have = !std::isnan(in.boiler) && !std::isnan(in.ret);
+    const float aim = cfg.band_high - 1, ceiling = cfg.band_high + 1;
+    auto aim_share = [&](float boiler) { return have ? (aim - in.ret) / std::max(boiler - in.ret, 3.0f) : 0.3f; };
+    switch (stage_) {
+      case Stage::IDLE:  // free-wheel: branch shut, valve left where it is
+        cfh_ = false;
+        if (in.mixed > cfg.band_low) break;
+        stage_ = Stage::PULSE;  // bottom of the band: start a pulse straight away
+        stage_t_ = 0;
+        [[fallthrough]];
+      case Stage::PULSE:
+        if (stage_t_ >= cfg.pulse_s + cfg.gap_s) {  // end of a gap: decide what comes next
+          stage_t_ = 0;
+          if (have && in.ret >= cfg.ret_target) { stage_ = Stage::IDLE; cfh_ = false; break; }
+          if (!have || in.boiler < in.ret + cfg.stored_margin) {  // stored heat used up: full call
+            stage_ = Stage::CALL_WAIT;
+            cfh_ = true;
+            set_open_(cfg.wait_open);
+            break;
+          }
+        }
+        cfh_ = stage_t_ < cfg.pulse_s;
+        if (cfh_) set_open_(valve::opening_on(valve::PULLED, std::clamp(aim_share(in.boiler), 0.0f, 0.65f)));
+        break;
+      case Stage::CALL_WAIT:  // full call: pull hard until the boiler pump starts
+        cfh_ = true;
+        set_open_(cfg.wait_open);
+        if (rate >= cfg.pump_rate || stage_t_ >= cfg.max_wait_s) {
+          stage_ = Stage::CALL;
+          call_t_ = stage_t_;
+          stage_t_ = 0;
+          opening_ = valve::opening_on(valve::PUMPED, std::clamp(aim_share(std::max(in.boiler, 55.0f)), 0.0f, 1.0f));
+          last_adjust_ = 0;
+        }
+        break;
+      case Stage::CALL:  // boiler pumping: coarse ceiling, at most one step every 30 s
+        cfh_ = true;
+        if (in.mixed > ceiling + 2) {
+          opening_ = std::max(0.0f, opening_ - 0.03f);  // well over: step every update
+          last_adjust_ = stage_t_;
+        } else if (stage_t_ - last_adjust_ >= 30) {
+          if (in.mixed > ceiling) { opening_ = std::max(0.0f, opening_ - 0.03f); last_adjust_ = stage_t_; }
+          else if (in.mixed < aim - 3) { opening_ = std::min(0.5f, opening_ + 0.02f); last_adjust_ = stage_t_; }
+        }
+        if (have && in.ret >= cfg.ret_target && call_t_ + stage_t_ >= cfg.min_call_s) {
+          stage_ = Stage::IDLE;
+          stage_t_ = 0;
+          cfh_ = false;
+        }
+        break;
+    }
+    share_ = opening_;  // (reporting only)
+    running_ = true;
+    status_ = stage_ == Stage::IDLE ? Status::FREE_WHEEL
+            : stage_ == Stage::PULSE ? Status::PULSING
+            : stage_ == Stage::CALL_WAIT ? Status::CALL_WAIT : Status::CALLING;
+    return true;
+  }
+
+  Stage stage_ = Stage::IDLE;
+  float stage_t_ = 0, call_t_ = 0, last_adjust_ = 0, last_mixed_ = NAN;
 
   bool cfh_ = false, heat_ = false, cap_off_ = false, band_started_ = false, band_heat_was_ = false;
   float opening_ = 0;

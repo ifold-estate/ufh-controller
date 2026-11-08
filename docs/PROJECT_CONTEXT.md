@@ -515,6 +515,19 @@ start), coarse ceiling 38–43 °C (≤ 1 step / 30 s), end when the return reac
 free. Band control (with the firmware's five-zone curve on a single zone) reproduces the short
 cycles and overshoots seen on 8 Nov.
 
+**v0.9 (staged mode in the firmware):** "Mixer mode" now Band / Fine / **Staged**. Staged: heating
+starts at Band low; free pulses (CFH 3 min 15 s, 30 s gaps, valve aimed at Band high − 1 on the
+pulled curve) while the boiler water is > return + 8 °C; then a full call: valve 61 % until the
+boiler pump starts (mix rising ≥ 0.15 °C/s, or 5 min), then onto the pumped curve and a coarse
+ceiling at Band high + 1 (≤ 1 step / 30 s, every update if > 2 °C over); ends when the return
+reaches "Return target" (33 °C) after ≥ 15 min. Status: Free-wheel / Pulsing / Call (waiting) /
+Calling. Unit-tested in `tools/mixer_sim/sim.cpp`. The 30 s gap is an assumption (1 min was
+tested): watch that pulses never start the boiler pump.
+
+**Second controller (Jon, 8 Nov):** considering a second Waveshare PLC at the boiler-side 2-port
+valve / upstream controller location, to replace the "dumb" timer chain with direct control. Weeks
+away at best; staged mode is the work-around meanwhile.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.

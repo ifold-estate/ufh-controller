@@ -221,7 +221,8 @@ switch:
     turn_off_action:
       - lambda: |-
           // In band mode the controller switches CFH; leaving auto hands it back switched off.
-          if (id(mixer_mode).active_index().value_or(0) == 0 && id(relay1).state) {
+          const auto mode = id(mixer_mode).active_index().value_or(0);
+          if ((mode == 0 || mode == 2) && id(relay1).state) {
             ESP_LOGI("mixer", "Mixer auto off: boiler CFH off");
             id(relay1).turn_off();
           }
@@ -242,11 +243,13 @@ switch:
 
 # Band: the mix swings between "Band low" and "Band high" by switching CFH (the controller owns CFH
 # while Mixer auto is on and the pump runs); the valve is set coarsely. Fine: hold the setpoint.
+# Staged: heating starts at "Band low"; free short pulses use the boiler's stored heat, then one
+# full call holds the mix under "Band high" until the return reaches "Return target".
 select:
   - platform: template
     id: mixer_mode
     name: "Mixer mode"
-    options: ["Band", "Fine"]
+    options: ["Band", "Fine", "Staged"]
     initial_option: "Band"
     optimistic: true
     restore_value: true
@@ -445,6 +448,17 @@ number:
     max_value: 50
     step: 0.5
     initial_value: 42
+    optimistic: true
+    restore_value: true
+    mode: box
+  - platform: template
+    id: ret_target
+    name: "Return target"       # staged mode: the heating phase ends when the return reaches this
+    unit_of_measurement: "°C"
+    min_value: 20
+    max_value: 45
+    step: 0.5
+    initial_value: 33
     optimistic: true
     restore_value: true
     mode: box
@@ -771,7 +785,10 @@ interval:
             cfg.limit = id(mixed_limit).state;
             cfg.kp = id(mixer_kp).state;
             cfg.ti = id(mixer_ti).state;
-            cfg.band = id(mixer_mode).active_index().value_or(0) == 0;
+            const auto mode = id(mixer_mode).active_index().value_or(0);
+            cfg.band = mode == 0;
+            cfg.staged = mode == 2;
+            cfg.ret_target = id(ret_target).state;
             cfg.band_low = id(band_low).state;
             cfg.band_high = id(band_high).state;
             cfg.boiler_max = id(boiler_max).state;
@@ -780,11 +797,11 @@ interval:
             cfg.cap_restart = id(boiler_cap_restart).state;
             c.update(in, cfg);
 
-            // Band mode in auto: the controller switches CFH (off whenever the pump is off).
-            if (automatic && cfg.band) {
+            // Band/staged mode in auto: the controller switches CFH (off whenever the pump is off).
+            if (automatic && (cfg.band || cfg.staged)) {
               const bool want = pump_on && c.cfh();
               if (want != id(relay1).state) {
-                ESP_LOGI("mixer", "Band: boiler CFH %s (%s, mix %.1f °C, boiler %.1f °C)", want ? "on" : "off",
+                ESP_LOGI("mixer", "%s: boiler CFH %s (%s, mix %.1f °C, boiler %.1f °C)", cfg.staged ? "Staged" : "Band", want ? "on" : "off",
                          mixer_control::status_text(c.status()), in.mixed, in.boiler);
                 if (want) id(relay1).turn_on(); else id(relay1).turn_off();
               }
