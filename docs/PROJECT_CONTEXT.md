@@ -446,7 +446,8 @@ maximum down one setting and will lower it further from the boiler-flow peaks we
 |---|---|---|---|
 | 4 | 1 | – | **Not opening**: check wiring and/or replace the actuator |
 | 4 | 2 | Furthest coil at the end of the kitchen: pipe runs through the hall to the hob, then turns left towards the door | Working |
-| 5–8 | – | to be mapped | |
+| 5 | 9 and 10 | The two coils in the lounge: pipes run through the hall towards the under-stair cupboard | Working |
+| 6–8 | – | to be mapped | |
 
 **Zone 1 tests (8 Nov, pump on setting 3, only relay 4 open):**
 - Valve curve, rising part (CFH on): boiler-water share ~10–20 % at 0–5 %, ~24 % at ~10 %, 42 % at
