@@ -323,7 +323,18 @@ class Controller {
           }
         }
         cfh_ = stage_t_ < cfg.pulse_s;
-        if (cfh_) set_open_(valve::opening_on(valve::PULLED, std::clamp(aim_share(in.boiler), 0.0f, 0.65f)));
+        if (cfh_) {
+          // Aim for the boiler water now arriving, but assume it's at least 60 °C: after an idle spell
+          // our probe's pipe has cooled and reads low until the first water arrives (8 Nov: read 44,
+          // water was 58 °C, valve opened fully, mix 47 °C).
+          const float want = valve::opening_on(valve::PULLED, std::clamp(aim_share(std::max(in.boiler, 60.0f)), 0.0f, 0.65f));
+          // Ceiling as in a full call: never open further while the mix is over it; close if it is.
+          if (in.mixed > ceiling) {
+            opening_ = std::max(0.0f, opening_ - 0.05f);
+          } else if (want < opening_ || in.mixed < aim - 1) {
+            set_open_(want);
+          }
+        }
         break;
       case Stage::CALL_WAIT:  // full call: pull hard until the boiler pump starts
         cfh_ = true;
