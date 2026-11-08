@@ -11,7 +11,7 @@ P = "heating_ufh_plc_"
 ENTITIES = {
     # rooms: setpoint and heating action from the climate entity; temperature from its sensor (finer
     # resolution on the re-flashed Nests)
-    "upstairs": "climate.upstairs_upstairs",
+    "upstairs": "climate.upstairs_upstairs",  # radiators (+ hot water): boiler pump runs for its calls
     "kitchen": "climate.nest_02aa01ac2613049n",
     "booth": "climate.booth_booth",
     "living": "climate.nest_02aa01ac38130bgw",

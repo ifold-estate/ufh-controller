@@ -452,6 +452,16 @@ maximum down one setting and will lower it further from the boiler-flow peaks we
 
 Floor plan with zones and thermostat positions: Jon's sketch of 8 Nov (not in the repo).
 
+**Thermostats in Home Assistant (8 Nov evening):** N1 Kitchen (`climate.nest_02aa01ac2613049n`) and N3
+Living Room (`climate.nest_02aa01ac38130bgw`), re-flashed with NoLongerEvil (MQTT); N2 Booth
+(`climate.booth_booth`) via the Google Smart Device API. A fourth Nest, "Upstairs"
+(`climate.upstairs_upstairs`), controls the **radiator system** (bedrooms and bathrooms upstairs, plus
+ground-floor rooms with no floor zones) and the hot water (not exposed to HA). It is not a floor
+zone, but its calls run the boiler pump, which turns our free "pulled" pulses into pumped flow. The
+playroom's T4 is not in HA. Outdoor temperature: `weather.forecast_home`. `tools/zone_analysis`
+fetches this history (read-only HA token in `~/.config/ufh/ha_token`, outside the repo) and fits
+each floor room's gain, lag and heat loss.
+
 **v1.0, thermostat-driven heating (`heating_demand.h`):** "Heating auto" (off by default) lets the
 thermostats drive everything: each zone valve opens while its thermostat calls (openings 30 s apart),
 the floor pump runs once a valve has been open 2 min (actuator time), CFH is allowed only while

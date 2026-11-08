@@ -22,10 +22,12 @@ import sys
 import numpy as np
 
 STEP_H = 1 / 6  # 10-minute grid
-# Rooms: thermostat, the controller input it drives, and its zone relays (8 Nov 2026 map; relay 6
+# Floor rooms: thermostat, the controller input it drives, and its zone relays (8 Nov 2026 map; relay 6
 # follows the kitchen since 23:40 that evening).
+# The playroom (T4, input 1, relay 7) has no thermostat in HA. "Upstairs" is the radiator system's
+# Nest (also hot water, not exposed): not a floor zone, but its heating calls run the boiler pump,
+# which changes how the mixer behaves (see the pumped/pulled valve curves).
 ROOMS = {
-    "upstairs": {"di": "di1", "relays": ["r7"]},          # T4 playroom: zones 7, 8
     "kitchen": {"di": "di2", "relays": ["r8", "r6"]},     # N1: zones 2, 3 (+ 4, 5 via relay 6)
     "booth": {"di": "di3", "relays": ["r4"]},             # N2: zones 1, 6
     "living": {"di": "di4", "relays": ["r5"]},            # N3 lounge: zones 9, 10
