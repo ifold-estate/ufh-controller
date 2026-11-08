@@ -480,6 +480,18 @@ boiler heat (the branch is shut). Ideas (not implemented): end the heating phase
 temperature or a minimum flow time instead of the mix; let the valve hold the mix under the band
 top as a ceiling during heating; detect real flow start from the boiler-probe upturn.
 
+**Pull test (8 Nov, 14:56, Jon's idea): use the boiler's stored heat during the 4 min delay.** Mixer
+auto off, valve at 40 %, pump on (zone 6), CFH on at t = 0 after 90 s off:
+- 2-port valve shut (CFH off): mix = return (31.3 / 30.6 °C): no boiler water at all.
+- 2-port open, boiler pump still off: our pump pulls boiler water: share ~13 % at 60 s, ~20 % at
+  150 s, ~22 % at 240 s; mix 31.3 → 36.9 °C. Useful, and 40 % open wasn't the limit.
+- Boiler pump starts (~4 min 05 s; seen at our probes ~4 min 25 s): share 22 → 56 % in 20 s, mix
+  37 → 49 °C (guard closed the valve and dropped CFH at 48.9 °C; hot slug peaked 52.2 °C at the probe,
+  board's 50 °C latch held CFH off). So the valve must close sharply the moment the pump starts
+  (detect a ~3 °C/10 s rise in the mix, or the boiler-probe upturn).
+- To test: CFH pulses shorter than 3 min 50 s may pull stored boiler heat without starting the
+  boiler pump or burner, if the upstream timer resets when the call drops (Jon to watch the boiler).
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.
