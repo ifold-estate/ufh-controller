@@ -448,7 +448,8 @@ maximum down one setting and will lower it further from the boiler-flow peaks we
 | 4 | 2 | Furthest coil at the end of the kitchen: pipe runs through the hall to the hob, then turns left towards the door | Working |
 | 5 | 9 and 10 | The two coils in the lounge: pipes run through the hall towards the under-stair cupboard | Working |
 | 6 | 5 and 6 | Kitchen, left-hand wall: one coil in the booth/dining area, one at the sink/hob. Notes on the wall by the manifold suggest 5 = sink/hob, 6 = booth/dining (unconfirmed) | Working |
-| 7–8 | – | to be mapped | |
+| 7 | 7 and 8 | The two coils in the playroom | Working |
+| 8 | 3 and 4 (by elimination) | to be confirmed | |
 
 **Zone 1 tests (8 Nov, pump on setting 3, only relay 4 open):**
 - Valve curve, rising part (CFH on): boiler-water share ~10–20 % at 0–5 %, ~24 % at ~10 %, 42 % at
