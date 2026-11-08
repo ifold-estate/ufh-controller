@@ -448,7 +448,7 @@ maximum down one setting and will lower it further from the boiler-flow peaks we
 | N1, Nest v1 | DI2 (pink) | Kitchen / conservatory | 8 | 2, 3 | |
 | N2, Nest v2 | DI3 (red) | Booth | 4 | 1, 6 | Zone 1's solenoid has failed (identified by elimination; cold corner); Jon may leave it open until replaced. Pipes to zones 2–5 run through this corridor |
 | N3, Nest v1 | DI4 (orange) | Lounge | 5 | 9, 10 | |
-| none | – | Kitchen centre (cooking area) | 6 | 4, 5 | Naturally warm, and pipes to 2 and 3 run underneath; left off for now ("Relay 6 mode"). A future virtual thermostat could average N1 and N2 |
+| none | – | Kitchen centre (cooking area) | 6 | 4, 5 | Naturally warm, and pipes to 2 and 3 run underneath; "Relay 6 mode" set to Follow N1 on 8 Nov 2026 (23:40): the kitchen loses a lot of heat and N1 stays low. A future virtual thermostat could average N1 and N2 |
 
 Floor plan with zones and thermostat positions: Jon's sketch of 8 Nov (not in the repo).
 
