@@ -435,6 +435,11 @@ loops. The valve curve of 7 Nov was measured at setting 2; re-measure it at sett
 steps, steadier boiler, both directions) and update `valve::CURVE`. Until then, if setting 3 makes
 the valve less boiler-dominated, the old curve errs on the cool (safe) side.
 
+**Guard raised to 50 °C (8 Nov):** "Mixed flow limit" is now 50 °C (Jon: it's only the guard, the
+band/setpoint stays lower, and the concrete floors filter brief peaks). Over-temp latch clears at
+45 °C. Test scripts: backup 52 °C, curve climbs stop at 48 °C. Jon also turned the boiler's own
+maximum down one setting and will lower it further from the boiler-flow peaks we record.
+
 **Commissioning (servo on the valve, Mixer auto off):**
 
 1. Press "Servo motor mode" (once; it's stored in the servo). Check the log shows limits 0 / 0.

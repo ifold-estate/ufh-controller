@@ -406,7 +406,7 @@ number:
     min_value: 30
     max_value: 55
     step: 0.5
-    initial_value: 45
+    initial_value: 50   # guard only; concrete floors (Jon, 8 Nov 2026)
     optimistic: true
     restore_value: true
     mode: box
