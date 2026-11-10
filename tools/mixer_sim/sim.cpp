@@ -421,6 +421,24 @@ void safety_checks() {
       assert(std::fabs(sum / n - 40) < 1.0f);
       printf("   average mode, slug then %s: last 15 min mean %.2f °C\n", pump_really ? "pumped" : "pulled", sum / n);
     }
+    // Several zones open (10 Nov 09:00-09:15): pumped flow passes about half what the single-zone curve
+    // says, and dips for a while. Stays pumped; the average still lands on 40.
+    {
+      Controller c; auto step = mk(c);
+      float mix = 32, sum = 0; int n = 0;
+      for (int i = 0; i < 720; i++) {               // 1 h
+        const float boiler = 64, ret = 32;
+        float truth = 0.5f * valve::share_on(valve::PUMPED, c.opening());
+        if (i >= 7 && i < 11) truth = 0.5f;
+        if (i >= 60 && i < 84) truth *= 0.4f;         // a 2 min dip
+        mix += (ret + truth * (boiler - ret) - mix) * 5 / 30;
+        step(boiler, mix, ret);
+        if (i > 360) { sum += mix; n++; }
+        if (i > 60) assert(c.avg_pumped());
+      }
+      assert(std::fabs(sum / n - 40) < 1.0f);
+      printf("   average mode, 3 zones pumped: last 30 min mean %.2f °C\n", sum / n);
+    }
     // Anti-windup: 30 min pinned open with a cold boiler, then hot water: no lingering push to hot.
     { Controller c; auto step = mk(c);
       for (int i = 0; i < 360; i++) step(32, 30, 29);

@@ -390,11 +390,15 @@ class Controller {
     if (measurable) {
       const float h = (in.mixed - in.ret) / (in.boiler - in.ret);
       const float pulled = valve::share_on(valve::PULLED, opening_), pumped = valve::share_on(valve::PUMPED, opening_);
-      const bool looks_pulled = h < (pulled + pumped) / 2 && h < pumped - 0.1f;
-      const bool looks_pumped = h > (pulled + pumped) / 2 && h > pulled + 0.1f;
+      // Nearer which curve, by ratio: the real pumped curve sits well below the single-zone one when
+      // several zones are open (10 Nov 09:02: 11-40 % measured at 20-30 % open, pump running), so the
+      // midpoint misjudged it. Back to pulled needs clear, lasting evidence (3 min); to pumped, 1 min.
+      const float mid = std::sqrt(std::max(pulled, 0.02f) * pumped);
+      const bool looks_pulled = h < 0.7f * mid && h < pumped - 0.1f;
+      const bool looks_pumped = h > mid && h > pulled + 0.1f;
       if (avg_pumped_ ? looks_pulled : looks_pumped) {
         avg_regime_t_ += in.dt;
-        if (avg_regime_t_ >= 60) {
+        if (avg_regime_t_ >= (avg_pumped_ ? 180 : 60)) {
           avg_pumped_ = !avg_pumped_;
           avg_pumped_t_ = 0;
           avg_regime_t_ = 0;

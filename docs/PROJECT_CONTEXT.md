@@ -593,7 +593,10 @@ down; the full call only opens below 38 °C, 2 % per 30 s, capped at 50 %.
   bridge the curves). Now the regime is checked against the measured share (mix − return) /
   (boiler − return) once the readings settle: a minute of clear evidence switches pulled ↔ pumped
   (also catches a cold boiler's pump start). Rises in the minute after the valve itself opened
-  further don't count as a pump start. Integral range widened to ±50 %.
+  further don't count as a pump start. Integral range widened to ±50 %. Same morning, 09:02: with
+  three zones open the real pumped flow sits far below the single-zone curve, and the midpoint test
+  switched back to pulled while the pump ran (15 min average 42–43 °C, peaks 46.6). Now "nearer"
+  is judged by ratio (geometric mean), and back to pulled needs 3 min of evidence (to pumped, 1 min).
 
 **Second controller (Jon, 8 Nov):** considering a second Waveshare PLC at the boiler-side 2-port
 valve / upstream controller location, to replace the "dumb" timer chain with direct control. Weeks
