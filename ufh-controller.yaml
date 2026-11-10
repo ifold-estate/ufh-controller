@@ -223,7 +223,7 @@ switch:
       - lambda: |-
           // In band mode the controller switches CFH; leaving auto hands it back switched off.
           const auto mode = id(mixer_mode).active_index().value_or(0);
-          if ((mode == 0 || mode == 2) && id(relay1).state) {
+          if (mode != 1 && id(relay1).state) {
             ESP_LOGI("mixer", "Mixer auto off: boiler CFH off");
             id(relay1).turn_off();
           }
@@ -258,6 +258,9 @@ switch:
 # while Mixer auto is on and the pump runs); the valve is set coarsely. Fine: hold the setpoint.
 # Staged: heating starts at "Band low"; free short pulses use the boiler's stored heat, then one
 # full call holds the mix under "Band high" until the return reaches "Return target".
+# Average (default): one continuous call while any thermostat calls; PI on the mix so its average
+# is "Mixed flow setpoint" (40 °C). Peaks over "Soft peak limit" close the valve; the 50 °C limit
+# still cuts CFH.
 select:
   # Relay 6 (kitchen centre, zones 4 and 5) has no thermostat of its own.
   - platform: template
@@ -271,8 +274,9 @@ select:
   - platform: template
     id: mixer_mode
     name: "Mixer mode"
-    options: ["Band", "Fine", "Staged"]
-    initial_option: "Band"
+    # Average (10 Nov 2026): continuous call while a thermostat calls, PI for a 40 °C average flow.
+    options: ["Band", "Fine", "Staged", "Average"]
+    initial_option: "Average"
     optimistic: true
     restore_value: true
     entity_category: config
@@ -438,12 +442,12 @@ number:
   # Mixer control settings (kept in flash)
   - platform: template
     id: mixed_setpoint
-    name: "Mixed flow setpoint"
+    name: "Mixed flow setpoint"   # Fine mode's setpoint; Average mode's target average
     unit_of_measurement: "°C"
     min_value: 20
     max_value: 50
     step: 0.5
-    initial_value: 35
+    initial_value: 40
     optimistic: true
     restore_value: true
     mode: box
@@ -552,6 +556,43 @@ number:
     restore_value: true
     mode: box
     entity_category: config
+  # Average mode
+  - platform: template
+    id: avg_kp
+    name: "Average gain"
+    unit_of_measurement: "%/°C"
+    min_value: 0
+    max_value: 10
+    step: 0.1
+    initial_value: 1.0
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: avg_ti
+    name: "Average integral time"
+    unit_of_measurement: "s"
+    min_value: 30
+    max_value: 1800
+    step: 10
+    initial_value: 180
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: soft_limit
+    name: "Soft peak limit"   # Average mode: over this the valve closes 5 % per update
+    unit_of_measurement: "°C"
+    min_value: 40
+    max_value: 50
+    step: 0.5
+    initial_value: 46
+    optimistic: true
+    restore_value: true
+    mode: box
+    entity_category: config
   - platform: template
     id: mixer_power
     name: "Mixer drive power"
@@ -597,7 +638,7 @@ number:
     min_value: 0.5
     max_value: 10
     step: 0.5
-    initial_value: 3
+    initial_value: 2   # Average mode: tighter control over fewer servo moves (Jon, 10 Nov 2026)
     optimistic: true
     restore_value: true
     mode: box
@@ -694,6 +735,26 @@ sensor:
     unit_of_measurement: "%"
     accuracy_decimals: 0
     update_interval: never   # published by the control loop
+  # The flow into the floor, averaged while the floor pump runs (Average mode's target is 40 °C).
+  - platform: template
+    id: mixed_avg_15m
+    name: "Mixed flow average"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    update_interval: never   # published by the control loop
+  - platform: template
+    id: mixed_avg_24h
+    name: "Mixed flow 24 h average"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    update_interval: never
+  # Mean water temperature in the floor coils, (mixed + return) / 2, while the pump runs.
+  - platform: template
+    id: coil_mean
+    name: "Floor coil mean"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    update_interval: never
   # What the controller expects at its current opening, from the valve curve it is using.
   - platform: template
     id: mixer_target_share
@@ -852,6 +913,7 @@ interval:
             in.ret = t(id(temp_return));
             in.pump_on = pump_on;
             in.automatic = automatic && pz.known();
+            in.cfh_on = id(relay1).state;
             in.dt = (millis() - last_ms) / 1000.0f;
             last_ms = millis();
             mixer_control::Settings cfg;
@@ -862,6 +924,10 @@ interval:
             const auto mode = id(mixer_mode).active_index().value_or(0);
             cfg.band = mode == 0;
             cfg.staged = mode == 2;
+            cfg.average = mode == 3;
+            cfg.avg_kp = id(avg_kp).state;
+            cfg.avg_ti = id(avg_ti).state;
+            cfg.soft_limit = id(soft_limit).state;
             cfg.ret_target = id(ret_target).state;
             cfg.band_low = id(band_low).state;
             cfg.band_high = id(band_high).state;
@@ -872,14 +938,47 @@ interval:
             c.update(in, cfg);
 
             // Band/staged mode in auto: the controller switches CFH (off whenever the pump is off).
-            if (automatic && (cfg.band || cfg.staged)) {
+            if (automatic && (cfg.band || cfg.staged || cfg.average)) {
               // With Heating auto, only while some thermostat calls.
               const bool want = pump_on && c.cfh() && (!id(heating_auto).state || heating_demand::instance().active());
               if (want != id(relay1).state) {
-                ESP_LOGI("mixer", "%s: boiler CFH %s (%s, mix %.1f °C, boiler %.1f °C)", cfg.staged ? "Staged" : "Band", want ? "on" : "off",
+                ESP_LOGI("mixer", "%s: boiler CFH %s (%s, mix %.1f °C, boiler %.1f °C)",
+                         cfg.average ? "Average" : cfg.staged ? "Staged" : "Band", want ? "on" : "off",
                          mixer_control::status_text(c.status()), in.mixed, in.boiler);
                 if (want) id(relay1).turn_on(); else id(relay1).turn_off();
               }
+            }
+
+            // Averages of the flow into the floor (only while the floor pump runs): per-minute buckets,
+            // so the 15 min and 24 h windows slide. Restart clears them.
+            {
+              static float sums[1440] = {};
+              static uint16_t counts[1440] = {};
+              static uint32_t cur = UINT32_MAX;
+              const uint32_t minute = millis() / 60000;
+              if (cur == UINT32_MAX) cur = minute;
+              while (cur < minute) {  // a new minute: start its bucket afresh
+                cur++;
+                sums[cur % 1440] = 0;
+                counts[cur % 1440] = 0;
+              }
+              if (pump_on && !std::isnan(in.mixed)) {
+                sums[cur % 1440] += in.mixed;
+                counts[cur % 1440]++;
+              }
+              auto window = [&](int minutes) {
+                float s = 0; uint32_t n = 0;
+                for (int k = 0; k < minutes; k++) { const uint32_t i = (cur + 1440 - k) % 1440; s += sums[i]; n += counts[i]; }
+                return n > 0 ? s / n : NAN;
+              };
+              auto pub = [](sensor::Sensor *s, float v, float step) {
+                if (std::isnan(v) ? s->has_state() && !std::isnan(s->state)
+                                  : !s->has_state() || std::isnan(s->state) || std::fabs(s->state - v) >= step)
+                  s->publish_state(v);
+              };
+              pub(id(mixed_avg_15m), window(15), 0.1f);
+              pub(id(mixed_avg_24h), window(1440), 0.1f);
+              pub(id(coil_mean), pump_on && !std::isnan(in.mixed) && !std::isnan(in.ret) ? (in.mixed + in.ret) / 2 : NAN, 0.1f);
             }
 
             // Over-temperature (or no mixed reading for 30 s): CFH off, and kept off until it clears.

@@ -111,20 +111,35 @@ struct Settings {
   float pump_rate = 0.15f;     // mix rising this fast (°C/s) = the boiler pump has started
   float max_wait_s = 300;
   float min_call_s = 900;
-  float boiler_expect_rise = 20;  // °C over setpoint the boiler is assumed to reach while it warms
+  float boiler_expect_rise = 20;  // °C over setpoint the boiler is assumed to reach while it warms  // Average mode (Jon, 10 Nov 2026; docs/PROJECT_CONTEXT.md): the goal is a long-term average of
+  // `setpoint` (40 °C) for the flow into the floor; brief peaks are fine (the concrete smooths them)
+  // and servo wear is secondary. One continuous call while the floor pump runs (the caller gates CFH
+  // on thermostat demand); PI on the mix in boiler-water share, through the curve that applies now
+  // (pulled until the boiler pump starts, pumped after), with feed-forward from the boiler water
+  // actually arriving. Simulated in tools/mixer_sim/avg_sim.py.
+  bool average = false;
+  float avg_kp = 1.0;          // % share per °C
+  float avg_ti = 180;          // s
+  float soft_limit = 46;       // over this the valve closes 5 % per update
+  float floor_boiler = 55;     // assume the boiler water at least this hot until it has flowed...
+  float floor_s = 45;          // ...this long (the probe's pipe cools while idle and reads low)
+  float flow_delay_s = 35;     // CFH on to boiler water at the mixer (2-port valve opens in ~15 s)
+  float soft_cut_s = 120;      // over soft_limit this long with the valve shut: CFH off...
 };
 
 struct Inputs {
   float boiler = NAN, mixed = NAN, ret = NAN;  // °C, NAN when unavailable
   bool pump_on = false;                        // floor pump running
   bool automatic = false;                      // "Mixer auto" switch
+  bool cfh_on = false;                         // boiler CFH relay actually on (Average mode)
   float dt = 5;                                // s since the last update
 };
 
 enum class Status : uint8_t {
   OFF, PUMP_OFF, PROBE_FAULT, OVER_TEMP, WAITING_BOILER, WARMING, HOLDING, COOLING,
   HEATING, BOILER_CAP, FREE_WHEEL,  // band mode
-  PULSING, CALL_WAIT, CALLING,      // staged mode
+  PULSING, CALL_WAIT, CALLING,      // staged mode (CALL_WAIT, CALLING, COOLING also in average mode)
+  NO_CALL,                          // average mode: no CFH (no thermostat calling)
 };
 
 inline const char *status_text(Status s) {
@@ -143,6 +158,7 @@ inline const char *status_text(Status s) {
     case Status::PULSING: return "Pulsing";
     case Status::CALL_WAIT: return "Call (waiting)";
     case Status::CALLING: return "Calling";
+    case Status::NO_CALL: return "No call";
   }
   return "";
 }
@@ -168,13 +184,14 @@ class Controller {
       running_ = false;
       band_started_ = false;
       stage_ = Stage::IDLE;
-      stage_ = Stage::IDLE;
+      avg_reset_();
       status_ = over_temp_ ? Status::OVER_TEMP : Status::OFF;
       return false;
     }
     if (over_temp_) {
       integral_ = 0;
       running_ = false;
+      avg_integ_ = 0;
       opening_ = share_ = 0;
       status_ = Status::OVER_TEMP;
       return true;
@@ -187,10 +204,12 @@ class Controller {
       integral_ = 0;
       running_ = false;
       band_started_ = false;
+      avg_reset_();
       status_ = Status::PUMP_OFF;
       return false;  // hold position, ready for the next start
     }
 
+    if (cfg.average) return average_(in, cfg);
     if (cfg.staged) return staged_(in, cfg);
     if (cfg.band) return band_(in, cfg);
 
@@ -298,6 +317,101 @@ class Controller {
     return true;
   }
 
+  // Average mode.
+  void avg_reset_() {
+    avg_cfh_t_ = 0;
+    avg_pumped_ = false;
+    avg_pumped_t_ = 0;
+    avg_integ_ = 0;
+    avg_soft_t_ = 0;
+    last_mixed_ = NAN;
+  }
+  bool average_(const Inputs &in, const Settings &cfg) {
+    const float sp = cfg.setpoint;
+    const float rate = std::isnan(last_mixed_) || in.dt <= 0 ? 0 : (in.mixed - last_mixed_) / in.dt;
+    last_mixed_ = in.mixed;
+
+    // Cooling fallback: the mix stayed over the soft limit with the valve shut (the boiler pushing hot
+    // water through a closed valve, or a slug that won't clear): CFH off until under the setpoint.
+    if (avg_cooling_) {
+      if (in.mixed < sp) avg_cooling_ = false;
+    } else if (in.mixed > cfg.soft_limit && opening_ <= 0.01f) {
+      avg_soft_t_ += in.dt;
+      if (avg_soft_t_ >= cfg.soft_cut_s) avg_cooling_ = true;
+    } else {
+      avg_soft_t_ = 0;
+    }
+    cfh_ = !avg_cooling_;
+    if (avg_cooling_) {
+      avg_reset_();
+      last_mixed_ = in.mixed;
+      opening_ = share_ = 0;
+      running_ = true;
+      status_ = Status::COOLING;
+      return true;
+    }
+
+    // Time with the boiler CFH actually on (the caller gates it on thermostat demand). Off: no flow
+    // from the boiler; hold the valve and start afresh next call.
+    if (!in.cfh_on) {
+      avg_cfh_t_ = 0;
+      avg_pumped_ = false;
+      avg_pumped_t_ = 0;
+      running_ = true;
+      status_ = Status::NO_CALL;
+      return false;
+    }
+    avg_cfh_t_ += in.dt;
+    const float flow_t = std::max(0.0f, avg_cfh_t_ - cfg.flow_delay_s);  // boiler water flowing
+
+    // Boiler pump: the mix rising fast (also when another system starts it), or the wait has run out
+    // (a cold boiler hardly lifts the mix when its pump starts). Then pumped for the rest of the call.
+    if (!avg_pumped_ && flow_t > 0 && (rate >= cfg.pump_rate || avg_cfh_t_ >= cfg.max_wait_s)) {
+      avg_pumped_ = true;
+      avg_pumped_t_ = 0;
+    }
+    if (avg_pumped_) avg_pumped_t_ += in.dt;
+
+    // Feed-forward from the boiler water arriving. Its probe reads low after an idle spell (and the
+    // first water after the boiler pump starts may be hotter than what had been standing), so assume at
+    // least floor_boiler until the water has flowed floor_s (8 Nov: probe 44, water 58 °C).
+    const bool settled = flow_t >= cfg.floor_s && (!avg_pumped_ || avg_pumped_t_ >= cfg.floor_s);
+    const bool have = !std::isnan(in.boiler) && !std::isnan(in.ret);
+    float ff = 0.3f;
+    if (have) {
+      const float tb = settled ? in.boiler : std::max(in.boiler, cfg.floor_boiler);
+      ff = (sp - in.ret) / std::max(tb - in.ret, 3.0f);
+    }
+    const float err = sp - in.mixed;  // positive: too cold
+    const float kp = cfg.avg_kp / 100.0f;
+    // Pulled: open no further than wait_open (61 %). The share hardly grows past it, and if the boiler
+    // pump starts with the valve wider, the slug arrives before the pump start can be seen.
+    const float cap = avg_pumped_ ? 1.0f : valve::share_on(valve::PULLED, cfg.wait_open);
+    float out = ff + kp * (err + avg_integ_ / cfg.avg_ti);
+    // The integral is what brings the average onto the setpoint. Anti-windup: only while the water
+    // flows (and its temperature is known), and not while pinned at either end.
+    const bool pinned_hot = out >= cap && err > 0, pinned_cold = out <= 0 && err < 0;
+    if (settled && have && !pinned_hot && !pinned_cold) {
+      avg_integ_ = std::clamp(avg_integ_ + err * in.dt, -30 * cfg.avg_ti, 30 * cfg.avg_ti);
+      out = ff + kp * (err + avg_integ_ / cfg.avg_ti);
+    }
+    share_ = std::clamp(out, 0.0f, cap);
+    float open = avg_pumped_ ? valve::opening_on(valve::PUMPED, share_) : valve::opening_on(valve::PULLED, share_);
+    // Soft limit: peaks under it are left to the floor; over it, close 5 % on each update.
+    if (in.mixed > cfg.soft_limit) open = std::min(open, std::max(0.0f, opening_ - 0.05f));
+    opening_ = open;
+    running_ = true;
+    status_ = avg_pumped_ ? Status::CALLING : Status::CALL_WAIT;
+    return true;
+  }
+  float avg_cfh_t_ = 0, avg_pumped_t_ = 0, avg_integ_ = 0, avg_soft_t_ = 0;
+  bool avg_pumped_ = false, avg_cooling_ = false;
+
+ public:
+  // Average mode: whether the boiler pump is taken to be running (for reporting and tests).
+  bool avg_pumped() const { return avg_pumped_; }
+
+ protected:
   // Staged mode.
   enum class Stage : uint8_t { IDLE, PULSE, CALL_WAIT, CALL };
   void set_open_(float o) {

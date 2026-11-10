@@ -545,6 +545,49 @@ reaches "Return target" (33 °C) after ≥ 15 min. Status: Free-wheel / Pulsing 
 Calling. Unit-tested in `tools/mixer_sim/sim.cpp`. The 30 s gap is an assumption (1 min was
 tested): watch that pulses never start the boiler pump.
 
+**Changed priorities (Jon, 10 Nov 2026):** after a few days of Staged mode the mixed flow averaged
+~35 °C against 40 (each ~4 min cycle: valve move, inrush peak, one correction, decay). New order:
+1. **A long-term average of 40 °C for the flow _into_ the floor** (the mixed-flow probe, not the coil
+   mean), as conventional installers set floors up.
+2. **Brief peaks above the target are fine** if under about a minute: the concrete smooths them. The
+   50 °C guard stays.
+3. **Servo wear is secondary:** the servo is cheap; tighter control matters more than fewer moves.
+Why Staged averaged low: every limit in it is a ceiling. Pulses aim for an assumed ≥ 60 °C boiler, so
+the mix decays as the stored water cools; the 30 s gaps and the idle spell to 35 °C pull the average
+down; the full call only opens below 38 °C, 2 % per 30 s, capped at 50 %.
+
+**v1.1, Average mode (`mixer_control.h`, `average_()`; default "Mixer mode"):**
+- One continuous call while the floor pump runs and a thermostat calls (Heating auto gates CFH). No
+  free pulses (simulated: they add ~1 % once the goal is 40 °C) and no return-target end.
+- PI on the mix every 5 s, in boiler-water share: "Average gain" 1 %/°C, "Average integral time"
+  180 s, setpoint "Mixed flow setpoint" (40). The integral is what puts the average on the setpoint;
+  expect dithering between two valve positions. Anti-windup: integrates only once the water has
+  flowed 45 s (after the boiler pump starts, too) and never while pinned at either end; trim ±30 %.
+- Feed-forward share = (setpoint − return) / (boiler − return), with the boiler probe as it reads; at
+  least 55 °C is assumed only for the first 45 s of flow (from 35 s after CFH on) and 45 s after the
+  boiler pump starts. That's the fix for Staged's decay.
+- Curve: pulled until the boiler pump starts (mix rising ≥ 0.15 °C/s, or 5 min of CFH), never wider
+  than 61 % (the share levels off; a wider valve lets the pump-start slug through); pumped after,
+  for the rest of the call. The pump start jumps straight to the pumped setting.
+- Peaks: over "Soft peak limit" (46 °C) the valve closes 5 % per update. If the mix stays over it
+  for 2 min with the valve shut, CFH goes off until the mix is under the setpoint (status
+  "Cooling"). The 50 °C limit still latches CFH off until under 45 °C.
+- Positioner deadband default 2 % (was 3); the reversal rule (twice the deadband within 30 s of a
+  move) stays. Expect 60–120 moves/h on the real valve.
+- Status: No call / Call (waiting) / Calling / Cooling.
+- New sensors: "Mixed flow average" (15 min sliding, only while the floor pump runs), "Mixed flow
+  24 h average", "Floor coil mean" ((mixed + return) / 2 while the pump runs). Cleared by a restart.
+- Simulated (`tools/mixer_sim/avg_sim.py`, plot `docs/avg_vs_staged.png`; 8 h calling): Staged mean
+  36.5 °C, 38 moves/h, 1.9 boiler-pump starts/h; Average 40.0 °C (38–43), 16 moves/h at a 3 % minimum
+  move (34 at 2 %), 0.1 pump starts/h, 22 % more heat. Unit tests in `sim.cpp`: holds the average on
+  a valve 25 % steeper than assumed (mean 39.99 °C), pulled cap, pump-start handover, wait timeout,
+  anti-windup, soft limit and the 2 min CFH cut, hard guard.
+- Caveats: the real valve is steeper than the simulator (nearly all the pumped mixing happens at
+  10–15 % open; the smallest move is 3–7 %), so expect ±3–4 °C swings and more moves; the average
+  should still land on 40. The pump-start slug reached 49 °C on 8 Nov: watch the first heated test.
+  A regulating (lockshield) valve on the mixer's hot inlet would spread the mixing over more travel.
+- Band, Fine and Staged remain as fallbacks.
+
 **Second controller (Jon, 8 Nov):** considering a second Waveshare PLC at the boiler-side 2-port
 valve / upstream controller location, to replace the "dumb" timer chain with direct control. Weeks
 away at best; staged mode is the work-around meanwhile.

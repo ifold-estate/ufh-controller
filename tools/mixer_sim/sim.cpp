@@ -362,6 +362,75 @@ void safety_checks() {
     for (int i = 0; i < 50; i++) assert(!pz.next(0, true, pc, &m));
     assert(pz.next(0.5f, true, pc, &m) && m.dir > 0);  // opening still works
   }
+  // Average mode (10 Nov 2026): continuous call, PI on the mix for a 40 °C average.
+  {
+    Settings cfg;
+    cfg.average = true;
+    cfg.setpoint = 40;
+    cfg.limit = 50;
+    auto mk = [&](Controller &c) {
+      return [&c, &cfg](float boiler, float mixed, float ret, bool cfh_on = true, float dt = 5) {
+        Inputs in;
+        in.boiler = boiler; in.mixed = mixed; in.ret = ret; in.pump_on = true; in.automatic = true;
+        in.cfh_on = cfh_on; in.dt = dt;
+        return c.update(in, cfg);
+      };
+    };
+    // No thermostat calling: the controller wants CFH, but it's held off; no valve moves.
+    { Controller c; auto step = mk(c);
+      assert(!step(60, 30, 28, false) && c.cfh() && c.status() == Status::NO_CALL); }
+    // Waiting for the boiler pump: pulled curve, never wider than wait_open (61 %), even with a cold
+    // boiler. The pump start (mix +1 °C in 5 s) goes straight onto the pumped curve.
+    { Controller c; auto step = mk(c);
+      for (int i = 0; i < 12; i++) step(30, 29, 28);
+      assert(c.status() == Status::CALL_WAIT && c.opening() <= cfg.wait_open + 1e-3f && c.opening() > 0.55f);
+      step(60, 30, 28); step(60, 31, 28);
+      assert(c.avg_pumped() && c.status() == Status::CALLING && c.opening() < 0.25f); }
+    // Over the wait limit without a visible pump start (cold boiler): taken as pumped anyway.
+    { Controller c; auto step = mk(c);
+      for (int i = 0; i < 61; i++) step(32, 30, 29);
+      assert(c.avg_pumped()); }
+    // Holds the average on a valve 25 % steeper than the curve it assumes: the integral finds it.
+    { Controller c; auto step = mk(c);
+      float mix = 30, sum = 0; int n = 0; float lo = 99, hi = 0;
+      for (int i = 0; i < 6 * 720; i++) {          // 6 h
+        const float boiler = 60 + 6 * std::sin(i * 5 / 600.0f), ret = 33;  // burner cycling
+        const float truth = valve::share_on(valve::PUMPED, std::min(1.0f, c.opening() * 1.25f));
+        mix += (ret + truth * (boiler - ret) - mix) * 5 / 30;  // probe lag
+        step(boiler, mix, ret);
+        if (i > 720) { sum += mix; n++; lo = std::min(lo, mix); hi = std::max(hi, mix); }
+      }
+      assert(std::fabs(sum / n - 40) < 0.5f && hi < 46 && !c.over_temp());
+      printf("   average mode: mean %.2f °C, range %.1f-%.1f\n", sum / n, lo, hi); }
+    // Anti-windup: 30 min pinned open with a cold boiler, then hot water: no lingering push to hot.
+    { Controller c; auto step = mk(c);
+      for (int i = 0; i < 360; i++) step(32, 30, 29);
+      step(62, 30, 29);
+      const float ff = (40 - 29.0f) / (62 - 29.0f);
+      for (int i = 0; i < 12; i++) step(62, 40, 29);
+      assert(std::fabs(c.share() - ff) < 0.05f); }
+    // Soft limit: over 46 °C the valve closes 5 % per update, whatever the PI wants.
+    { Controller c; auto step = mk(c);
+      for (int i = 0; i < 70; i++) step(40, 30, 29);   // pumped, opening well up
+      const float o = c.opening();
+      step(60, 47, 29);
+      assert(c.opening() <= o - 0.05f + 1e-4f);
+      for (int i = 0; i < 40 && c.opening() > 0; i++) step(70, 47, 29);
+      assert(c.opening() == 0 && c.cfh());              // shut; CFH still on...
+      for (int i = 0; i < 23; i++) step(70, 47, 29);
+      assert(c.cfh());
+      step(70, 47, 29);                                  // ...until 2 min over with the valve shut
+      assert(!c.cfh() && c.status() == Status::COOLING);
+      step(70, 41, 29, false);
+      assert(!c.cfh());                                  // until under the setpoint
+      step(70, 39.5f, 29, false);
+      assert(c.cfh()); }
+    // Hard guard unchanged: 50 °C latches over-temp, valve to cold.
+    { Controller c; auto step = mk(c);
+      for (int i = 0; i < 70; i++) step(40, 30, 29);
+      step(70, 50.5f, 29);
+      assert(c.over_temp() && c.opening() == 0); }
+  }
   printf("safety checks passed\n\n");
 }
 
