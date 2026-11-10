@@ -322,6 +322,8 @@ class Controller {
     avg_cfh_t_ = 0;
     avg_pumped_ = false;
     avg_pumped_t_ = 0;
+    avg_regime_t_ = 0;
+    avg_wait_done_ = false;
     avg_integ_ = 0;
     avg_soft_t_ = 0;
     last_mixed_ = NAN;
@@ -357,6 +359,8 @@ class Controller {
       avg_cfh_t_ = 0;
       avg_pumped_ = false;
       avg_pumped_t_ = 0;
+      avg_regime_t_ = 0;
+      avg_wait_done_ = false;
       running_ = true;
       status_ = Status::NO_CALL;
       return false;
@@ -366,11 +370,39 @@ class Controller {
 
     // Boiler pump: the mix rising fast (also when another system starts it), or the wait has run out
     // (a cold boiler hardly lifts the mix when its pump starts). Then pumped for the rest of the call.
-    if (!avg_pumped_ && flow_t > 0 && (rate >= cfg.pump_rate || avg_cfh_t_ >= cfg.max_wait_s)) {
+    // A fast rise in the minute after we opened the valve further is our own doing, not the pump.
+    avg_opened_t_ += in.dt;
+    const bool own_rise = avg_opened_t_ < 60 && avg_cfh_t_ > avg_opened_t_ + cfg.flow_delay_s;
+    if (!avg_pumped_ && flow_t > 0 && ((rate >= cfg.pump_rate && !own_rise) || (avg_cfh_t_ >= cfg.max_wait_s && !avg_wait_done_))) {
+      avg_wait_done_ = true;
       avg_pumped_ = true;
       avg_pumped_t_ = 0;
     }
     if (avg_pumped_) avg_pumped_t_ += in.dt;
+
+    // Check the regime against what the valve is actually passing: the measured boiler-water share
+    // (mix - return) / (boiler - return), once the readings have settled. A fast rise at the start of
+    // flow can be stored hot water arriving, not the boiler pump (10 Nov 08:37: taken as pumped, the
+    // valve sat at 15 % passing 9 % boiler water and the mix held ~34 °C). And a cold boiler's pump
+    // start hardly lifts the mix. Each needs a minute of clear evidence.
+    const bool measurable = !std::isnan(in.boiler) && !std::isnan(in.ret) && in.boiler - in.ret > 8 &&
+                            avg_cfh_t_ >= cfg.flow_delay_s + 60;
+    if (measurable) {
+      const float h = (in.mixed - in.ret) / (in.boiler - in.ret);
+      const float pulled = valve::share_on(valve::PULLED, opening_), pumped = valve::share_on(valve::PUMPED, opening_);
+      const bool looks_pulled = h < (pulled + pumped) / 2 && h < pumped - 0.1f;
+      const bool looks_pumped = h > (pulled + pumped) / 2 && h > pulled + 0.1f;
+      if (avg_pumped_ ? looks_pulled : looks_pumped) {
+        avg_regime_t_ += in.dt;
+        if (avg_regime_t_ >= 60) {
+          avg_pumped_ = !avg_pumped_;
+          avg_pumped_t_ = 0;
+          avg_regime_t_ = 0;
+        }
+      } else {
+        avg_regime_t_ = 0;
+      }
+    }
 
     // Feed-forward from the boiler water arriving. Its probe reads low after an idle spell (and the
     // first water after the boiler pump starts may be hotter than what had been standing), so assume at
@@ -392,20 +424,21 @@ class Controller {
     // flows (and its temperature is known), and not while pinned at either end.
     const bool pinned_hot = out >= cap && err > 0, pinned_cold = out <= 0 && err < 0;
     if (settled && have && !pinned_hot && !pinned_cold) {
-      avg_integ_ = std::clamp(avg_integ_ + err * in.dt, -30 * cfg.avg_ti, 30 * cfg.avg_ti);
+      avg_integ_ = std::clamp(avg_integ_ + err * in.dt, -50 * cfg.avg_ti, 50 * cfg.avg_ti);
       out = ff + kp * (err + avg_integ_ / cfg.avg_ti);
     }
     share_ = std::clamp(out, 0.0f, cap);
     float open = avg_pumped_ ? valve::opening_on(valve::PUMPED, share_) : valve::opening_on(valve::PULLED, share_);
     // Soft limit: peaks under it are left to the floor; over it, close 5 % on each update.
     if (in.mixed > cfg.soft_limit) open = std::min(open, std::max(0.0f, opening_ - 0.05f));
+    if (open > opening_ + 0.01f) avg_opened_t_ = 0;
     opening_ = open;
     running_ = true;
     status_ = avg_pumped_ ? Status::CALLING : Status::CALL_WAIT;
     return true;
   }
-  float avg_cfh_t_ = 0, avg_pumped_t_ = 0, avg_integ_ = 0, avg_soft_t_ = 0;
-  bool avg_pumped_ = false, avg_cooling_ = false;
+  float avg_cfh_t_ = 0, avg_pumped_t_ = 0, avg_integ_ = 0, avg_soft_t_ = 0, avg_regime_t_ = 0, avg_opened_t_ = 0;
+  bool avg_pumped_ = false, avg_cooling_ = false, avg_wait_done_ = false;
 
  public:
   // Average mode: whether the boiler pump is taken to be running (for reporting and tests).

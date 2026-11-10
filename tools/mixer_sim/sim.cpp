@@ -402,6 +402,25 @@ void safety_checks() {
       }
       assert(std::fabs(sum / n - 40) < 0.5f && hi < 46 && !c.over_temp());
       printf("   average mode: mean %.2f °C, range %.1f-%.1f\n", sum / n, lo, hi); }
+    // 10 Nov 08:37: stored hot water arriving fast looked like the boiler pump starting, but the pump
+    // never ran. The measured share shows pulled flow: back onto the pulled curve, and the mix
+    // reaches 40 °C. Pumped flow that really is pumped stays pumped.
+    for (bool pump_really : {false, true}) {
+      Controller c; auto step = mk(c);
+      float mix = 32, sum = 0; int n = 0;
+      for (int i = 0; i < 360; i++) {               // 30 min
+        const float boiler = 64, ret = 32;
+        float truth = pump_really ? valve::share_on(valve::PUMPED, c.opening())
+                                  : valve::share_on(valve::PULLED, c.opening());
+        if (i >= 7 && i < 11) truth = 0.5f;          // the stored slug: mix +1.5 °C per 5 s
+        mix += (ret + truth * (boiler - ret) - mix) * 5 / 30;
+        step(boiler, mix, ret);
+        if (i > 180) { sum += mix; n++; }
+      }
+      assert(c.avg_pumped() == pump_really);
+      assert(std::fabs(sum / n - 40) < 1.0f);
+      printf("   average mode, slug then %s: last 15 min mean %.2f °C\n", pump_really ? "pumped" : "pulled", sum / n);
+    }
     // Anti-windup: 30 min pinned open with a cold boiler, then hot water: no lingering push to hot.
     { Controller c; auto step = mk(c);
       for (int i = 0; i < 360; i++) step(32, 30, 29);

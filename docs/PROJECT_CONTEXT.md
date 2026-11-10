@@ -587,6 +587,13 @@ down; the full call only opens below 38 °C, 2 % per 30 s, capped at 50 %.
   should still land on 40. The pump-start slug reached 49 °C on 8 Nov: watch the first heated test.
   A regulating (lockshield) valve on the mixer's hot inlet would spread the mixing over more travel.
 - Band, Fine and Staged remain as fallbacks.
+- **First run (10 Nov 08:37), fixed the same morning:** the stored hot water arriving fast at the start
+  of flow was taken as the boiler pump starting, but the pump never ran; on the pumped curve the
+  valve sat at 15 % passing ~9 % boiler water and the mix held ~34 °C (the ±30 % integral couldn't
+  bridge the curves). Now the regime is checked against the measured share (mix − return) /
+  (boiler − return) once the readings settle: a minute of clear evidence switches pulled ↔ pumped
+  (also catches a cold boiler's pump start). Rises in the minute after the valve itself opened
+  further don't count as a pump start. Integral range widened to ±50 %.
 
 **Second controller (Jon, 8 Nov):** considering a second Waveshare PLC at the boiler-side 2-port
 valve / upstream controller location, to replace the "dumb" timer chain with direct control. Weeks
