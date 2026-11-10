@@ -602,6 +602,10 @@ down; the full call only opens below 38 °C, 2 % per 30 s, capped at 50 %.
   running for hot water (radiators idle, no zone changes). The 55 °C limit (Jon raised it from 50)
   cut CFH. The soft-limit CFH cut now acts after 30 s with the valve shut, not 2 min. Strong case for
   a regulating/lockshield valve on the mixer's hot inlet.
+  10:23: the next call started on the pulled curve with the boiler pump still running (valve to
+  ~30 %, mix 48 °C). Calls now start on the pumped curve whenever the boiler is over setpoint + 15 °C,
+  and the measured share moves them to pulled (~5–8 min) if its pump isn't running. The integral
+  resets on each curve switch.
 
 **Second controller (Jon, 8 Nov):** considering a second Waveshare PLC at the boiler-side 2-port
 valve / upstream controller location, to replace the "dumb" timer chain with direct control. Weeks

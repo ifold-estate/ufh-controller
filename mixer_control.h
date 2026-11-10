@@ -366,6 +366,14 @@ class Controller {
       status_ = Status::NO_CALL;
       return false;
     }
+    // Start of a call: with the boiler already hot it may be pumping for something else (hot water,
+    // radiators), and a pulled-curve opening then lets a slug through (10 Nov 10:23). Start on the
+    // pumped curve (the cautious one); the measured share moves it to pulled within a few minutes if
+    // the pump isn't running.
+    if (avg_cfh_t_ == 0 && !std::isnan(in.boiler) && in.boiler > sp + 15) {
+      avg_pumped_ = true;
+      avg_pumped_t_ = cfg.floor_s;  // the boiler probe is reading hot water: no floor needed
+    }
     avg_cfh_t_ += in.dt;
     const float flow_t = std::max(0.0f, avg_cfh_t_ - cfg.flow_delay_s);  // boiler water flowing
 
@@ -403,6 +411,7 @@ class Controller {
           avg_pumped_ = !avg_pumped_;
           avg_pumped_t_ = 0;
           avg_regime_t_ = 0;
+          avg_integ_ = 0;  // the trim belonged to the other curve
         }
       } else {
         avg_regime_t_ = 0;
