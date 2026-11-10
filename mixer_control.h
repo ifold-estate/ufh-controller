@@ -124,7 +124,8 @@ struct Settings {
   float floor_boiler = 55;     // assume the boiler water at least this hot until it has flowed...
   float floor_s = 45;          // ...this long (the probe's pipe cools while idle and reads low)
   float flow_delay_s = 35;     // CFH on to boiler water at the mixer (2-port valve opens in ~15 s)
-  float soft_cut_s = 120;      // over soft_limit this long with the valve shut: CFH off...
+  float soft_cut_s = 30;       // over soft_limit this long with the valve shut: CFH off (10 Nov
+                               // 10:21: boiler water forced through the shut mixer, 46 -> 55 °C in 60 s)
 };
 
 struct Inputs {

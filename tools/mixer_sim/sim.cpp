@@ -454,9 +454,9 @@ void safety_checks() {
       assert(c.opening() <= o - 0.05f + 1e-4f);
       for (int i = 0; i < 40 && c.opening() > 0; i++) step(70, 47, 29);
       assert(c.opening() == 0 && c.cfh());              // shut; CFH still on...
-      for (int i = 0; i < 23; i++) step(70, 47, 29);
+      for (int i = 0; i < 5; i++) step(70, 47, 29);
       assert(c.cfh());
-      step(70, 47, 29);                                  // ...until 2 min over with the valve shut
+      step(70, 47, 29);                                  // ...until 30 s over with the valve shut
       assert(!c.cfh() && c.status() == Status::COOLING);
       step(70, 41, 29, false);
       assert(!c.cfh());                                  // until under the setpoint

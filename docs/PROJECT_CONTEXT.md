@@ -597,6 +597,11 @@ down; the full call only opens below 38 °C, 2 % per 30 s, capped at 50 %.
   three zones open the real pumped flow sits far below the single-zone curve, and the midpoint test
   switched back to pulled while the pump ran (15 min average 42–43 °C, peaks 46.6). Now "nearer"
   is judged by ratio (geometric mean), and back to pulled needs 3 min of evidence (to pumped, 1 min).
+  10:21: with the valve shut (cold switch made) the measured share still rose 32 → 62 % and the mix
+  46 → 55 °C in a minute: boiler water forced through the closed mixer, probably the boiler pump
+  running for hot water (radiators idle, no zone changes). The 55 °C limit (Jon raised it from 50)
+  cut CFH. The soft-limit CFH cut now acts after 30 s with the valve shut, not 2 min. Strong case for
+  a regulating/lockshield valve on the mixer's hot inlet.
 
 **Second controller (Jon, 8 Nov):** considering a second Waveshare PLC at the boiler-side 2-port
 valve / upstream controller location, to replace the "dumb" timer chain with direct control. Weeks
