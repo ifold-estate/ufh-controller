@@ -120,7 +120,7 @@ struct Settings {
   bool average = false;
   float avg_kp = 1.0;          // % share per °C
   float avg_ti = 180;          // s
-  float soft_limit = 46;       // over this the valve closes 5 % per update
+  float soft_limit = 51;       // over this the valve closes 5 % per update (setpoint + 6)
   float floor_boiler = 55;     // assume the boiler water at least this hot until it has flowed...
   float floor_s = 45;          // ...this long (the probe's pipe cools while idle and reads low)
   float flow_delay_s = 35;     // CFH on to boiler water at the mixer (2-port valve opens in ~15 s)

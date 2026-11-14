@@ -368,6 +368,7 @@ void safety_checks() {
     cfg.average = true;
     cfg.setpoint = 40;
     cfg.limit = 50;
+    cfg.soft_limit = 46;  // (the tests were written for the 40 °C setpoint)
     auto mk = [&](Controller &c) {
       return [&c, &cfg](float boiler, float mixed, float ret, bool cfh_on = true, float dt = 5) {
         Inputs in;

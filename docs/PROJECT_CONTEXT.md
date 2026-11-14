@@ -587,6 +587,11 @@ down; the full call only opens below 38 °C, 2 % per 30 s, capped at 50 %.
   should still land on 40. The pump-start slug reached 49 °C on 8 Nov: watch the first heated test.
   A regulating (lockshield) valve on the mixer's hot inlet would spread the mixing over more travel.
 - Band, Fine and Staged remain as fallbacks.
+- **14 Nov 2026, setpoint 40 → 45 °C (Jon):** with freezing nights the kitchen fell from 17 to 15.5 °C
+  between 00:00 and 05:00 with its Nest calling throughout, while the mix averaged 39–40 °C (24 h
+  average 39.4–39.7). Guard rails moved up with it: "Soft peak limit" 46 → 51 °C, "Mixed flow limit"
+  55 → 60 °C (latch releases at 55). Typical screed guidance is a 55 °C maximum flow; the 60 °C
+  limit only catches brief slugs above the soft limit.
 - **First run (10 Nov 08:37), fixed the same morning:** the stored hot water arriving fast at the start
   of flow was taken as the boiler pump starting, but the pump never ran; on the pumped curve the
   valve sat at 15 % passing ~9 % boiler water and the mix held ~34 °C (the ±30 % integral couldn't

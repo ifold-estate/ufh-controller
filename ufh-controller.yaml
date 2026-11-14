@@ -447,7 +447,7 @@ number:
     min_value: 20
     max_value: 50
     step: 0.5
-    initial_value: 40
+    initial_value: 45   # raised from 40 (Jon, 14 Nov 2026: freezing weather, kitchen can't keep up)
     optimistic: true
     restore_value: true
     mode: box
@@ -456,9 +456,9 @@ number:
     name: "Mixed flow limit"
     unit_of_measurement: "°C"
     min_value: 30
-    max_value: 55
+    max_value: 65
     step: 0.5
-    initial_value: 50   # guard only; concrete floors (Jon, 8 Nov 2026)
+    initial_value: 60   # guard only: 50 (8 Nov), 55 (Jon, ~10 Nov), 60 with the 45 °C setpoint (14 Nov)
     optimistic: true
     restore_value: true
     mode: box
@@ -586,9 +586,9 @@ number:
     name: "Soft peak limit"   # Average mode: over this the valve closes 5 % per update
     unit_of_measurement: "°C"
     min_value: 40
-    max_value: 50
+    max_value: 60
     step: 0.5
-    initial_value: 46
+    initial_value: 51   # setpoint + 6
     optimistic: true
     restore_value: true
     mode: box
