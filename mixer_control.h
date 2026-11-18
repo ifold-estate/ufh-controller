@@ -124,6 +124,12 @@ struct Settings {
   float floor_boiler = 55;     // assume the boiler water at least this hot until it has flowed...
   float floor_s = 45;          // ...this long (the probe's pipe cools while idle and reads low)
   float flow_delay_s = 35;     // CFH on to boiler water at the mixer (2-port valve opens in ~15 s)
+  // Early close (18 Nov 2026): our call starts the boiler pump when the upstream controller's timer
+  // runs out, 4 min 15-30 s after CFH (at our probes). Go onto the pumped setting just before, so the
+  // slug meets a nearly shut valve; and don't take the evidence of pulled flow until the pump start
+  // is overdue. Interim: a second controller at the boiler will drive its pump directly.
+  float pre_close_s = 240;
+  float pump_due_by_s = 330;
   float soft_cut_s = 30;       // over soft_limit this long with the valve shut: CFH off (10 Nov
                                // 10:21: boiler water forced through the shut mixer, 46 -> 55 °C in 60 s)
 };
@@ -325,6 +331,7 @@ class Controller {
     avg_pumped_t_ = 0;
     avg_regime_t_ = 0;
     avg_wait_done_ = false;
+    avg_pre_closed_ = false;
     avg_integ_ = 0;
     avg_soft_t_ = 0;
     last_mixed_ = NAN;
@@ -362,6 +369,7 @@ class Controller {
       avg_pumped_t_ = 0;
       avg_regime_t_ = 0;
       avg_wait_done_ = false;
+      avg_pre_closed_ = false;
       running_ = true;
       status_ = Status::NO_CALL;
       return false;
@@ -377,15 +385,19 @@ class Controller {
     avg_cfh_t_ += in.dt;
     const float flow_t = std::max(0.0f, avg_cfh_t_ - cfg.flow_delay_s);  // boiler water flowing
 
-    // Boiler pump: the mix rising fast (also when another system starts it), or the wait has run out
-    // (a cold boiler hardly lifts the mix when its pump starts). Then pumped for the rest of the call.
+    // Boiler pump: expected (early close, just before our call's timer starts it), the mix rising fast
+    // (also when another system starts it), or the wait has run out. Then pumped unless the measured
+    // share shows otherwise (below).
     // A fast rise in the minute after we opened the valve further is our own doing, not the pump.
     avg_opened_t_ += in.dt;
     const bool own_rise = avg_opened_t_ < 60 && avg_cfh_t_ > avg_opened_t_ + cfg.flow_delay_s;
-    if (!avg_pumped_ && flow_t > 0 && ((rate >= cfg.pump_rate && !own_rise) || (avg_cfh_t_ >= cfg.max_wait_s && !avg_wait_done_))) {
+    const bool pre_close = !avg_pre_closed_ && avg_cfh_t_ >= cfg.pre_close_s;
+    if (pre_close) avg_pre_closed_ = true;
+    if (!avg_pumped_ && (pre_close || (flow_t > 0 && ((rate >= cfg.pump_rate && !own_rise) || (avg_cfh_t_ >= cfg.max_wait_s && !avg_wait_done_))))) {
       avg_wait_done_ = true;
       avg_pumped_ = true;
       avg_pumped_t_ = 0;
+      avg_integ_ = 0;  // the trim belonged to the pulled curve
     }
     if (avg_pumped_) avg_pumped_t_ += in.dt;
 
@@ -407,7 +419,8 @@ class Controller {
       const bool looks_pumped = h > mid && h > pulled + 0.1f;
       if (avg_pumped_ ? looks_pulled : looks_pumped) {
         avg_regime_t_ += in.dt;
-        if (avg_regime_t_ >= (avg_pumped_ ? 180 : 60)) {
+        // Back to pulled only once the boiler pump's start is overdue (it may be seconds away).
+        if (avg_regime_t_ >= (avg_pumped_ ? 180 : 60) && (!avg_pumped_ || avg_cfh_t_ >= cfg.pump_due_by_s)) {
           avg_pumped_ = !avg_pumped_;
           avg_pumped_t_ = 0;
           avg_regime_t_ = 0;
@@ -452,7 +465,7 @@ class Controller {
     return true;
   }
   float avg_cfh_t_ = 0, avg_pumped_t_ = 0, avg_integ_ = 0, avg_soft_t_ = 0, avg_regime_t_ = 0, avg_opened_t_ = 0;
-  bool avg_pumped_ = false, avg_cooling_ = false, avg_wait_done_ = false;
+  bool avg_pumped_ = false, avg_cooling_ = false, avg_wait_done_ = false, avg_pre_closed_ = false;
 
  public:
   // Average mode: whether the boiler pump is taken to be running (for reporting and tests).

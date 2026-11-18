@@ -387,6 +387,19 @@ void safety_checks() {
       assert(c.status() == Status::CALL_WAIT && c.opening() <= cfg.wait_open + 1e-3f && c.opening() > 0.55f);
       step(60, 30, 28); step(60, 31, 28);
       assert(c.avg_pumped() && c.status() == Status::CALLING && c.opening() < 0.25f); }
+    // Early close (18 Nov): at 4 min, before the boiler pump's due start, the valve goes to the pumped
+    // setting with no rise seen; and a hot-boiler call can't drop back to pulled before 5.5 min.
+    { Controller c; auto step = mk(c);
+      for (int i = 0; i < 47; i++) step(50, 38, 30);     // 235 s, pulled (boiler not hot), mix steady
+      assert(!c.avg_pumped() && c.opening() > 0.4f);
+      step(50, 38, 30);                                   // 240 s
+      assert(c.avg_pumped() && c.opening() < 0.25f); }
+    { Controller c; auto step = mk(c);
+      for (int i = 0; i < 65; i++) {                      // hot boiler, pump not (yet) running: pulled
+        const float truth = valve::share_on(valve::PULLED, c.opening());
+        step(64, 32 + truth * 32, 32);
+        if (i * 5 < 325) assert(c.avg_pumped());          // no drop back before the pump is due
+      } }
     // Over the wait limit without a visible pump start (cold boiler): taken as pumped anyway.
     { Controller c; auto step = mk(c);
       for (int i = 0; i < 61; i++) step(32, 30, 29);

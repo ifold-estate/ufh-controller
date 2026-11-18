@@ -616,6 +616,19 @@ down; the full call only opens below 38 °C, 2 % per 30 s, capped at 50 %.
   and the measured share moves them to pulled (~5–8 min) if its pump isn't running. The integral
   resets on each curve switch.
 
+**Boiler-pump slugs and the early close (18 Nov 2026):** since Average mode started the mix has spent
+13–78 min a day over 50 °C in spells of up to 4 min (peaks 55–59 °C), almost all at the boiler-pump
+start at the beginning of a call: the valve is open for pulled flow, the pump multiplies the share
+~2.5×, and the mixer passes a lot even nearly shut. Daily mix averages were on target (39.1–39.4 at
+40 °C, 44.6–45.0 at 45 °C). The hot-inlet probe can't give earlier warning: the water there is
+already hot from the pulled stage; the slug is a jump in flow, not temperature (+0.3 °C at the inlet
+while the mix rose +2 °C). So, interim until the boiler-side controller drives the pump directly
+(Jon, ≥ 1 month): **at 4 min after CFH the valve goes to the pumped setting** (`pre_close_s` 240), just
+before our call's timer starts the boiler pump (4 min 15–30 s at our probes), and the measured share
+can't move it back to pulled before 5.5 min (`pump_due_by_s` 330). Pump starts by other demand
+(hot water, radiators) still rely on the rise detector; a boiler-pump power signal (e.g. a power
+monitor on its supply) would catch those too.
+
 **Input 4 stuck ON (16–18 Nov 2026):** from 16 Nov 00:55 the controller reported Input 4 (lounge)
 ON for 44 h while the Living Room Nest was idle, the room reached 22 °C against 19, and Jon measured
 ~0 Vac at the input with its LED off. A restart cleared it. Cause: ESPHome's GPIO binary sensor has
