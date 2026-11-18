@@ -629,6 +629,14 @@ can't move it back to pulled before 5.5 min (`pump_due_by_s` 330). Pump starts b
 (hot water, radiators) still rely on the rise detector; a boiler-pump power signal (e.g. a power
 monitor on its supply) would catch those too.
 
+**LCD blank most of the time (fixed 18 Nov 2026):** the 10-minute LCD re-init (`lcd_reset.h`, added
+8 Nov against relay glitches) re-ran the display's setup(), which also allocates a new 153,600-byte
+frame buffer and never frees the old one: ~0.9 MB/h. After ~8 h the 8 MB PSRAM was exhausted, the
+allocation failed, the display marked itself failed and stopped drawing until the board restarted;
+"LCD reset" couldn't recover it. The board ran 93–97 h between restarts (14–18 Nov), so the screen
+was blank most of the time. reinit() now frees the new buffer and keeps the one in use. New "Heap
+free" and "PSRAM free" sensors (every 60 s) show any future leak.
+
 **Input 4 stuck ON (16–18 Nov 2026):** from 16 Nov 00:55 the controller reported Input 4 (lounge)
 ON for 44 h while the Living Room Nest was idle, the room reached 22 °C against 19, and Jon measured
 ~0 Vac at the input with its LED off. A restart cleared it. Cause: ESPHome's GPIO binary sensor has

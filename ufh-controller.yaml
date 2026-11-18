@@ -76,6 +76,9 @@ esp32:
   framework:
     type: esp-idf
 
+debug:
+  update_interval: 60s
+
 psram:
   mode: octal
   speed: 80MHz
@@ -777,6 +780,12 @@ sensor:
 
   - platform: uptime
     name: "Uptime"
+  # Memory, to catch leaks (the LCD re-init leaked 150 KB of PSRAM every 10 min until 18 Nov 2026).
+  - platform: debug
+    free:
+      name: "Heap free"
+    psram:
+      name: "PSRAM free"
 
 # ---------------------------------------------------------------- Indicators
 output:
