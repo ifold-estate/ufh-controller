@@ -28,8 +28,8 @@ STEP_H = 1 / 6  # 10-minute grid
 # Nest (also hot water, not exposed): not a floor zone, but its heating calls run the boiler pump,
 # which changes how the mixer behaves (see the pumped/pulled valve curves).
 ROOMS = {
-    "kitchen": {"di": "di2", "relays": ["r8", "r6"]},     # N1: zones 2, 3 (+ 4, 5 via relay 6)
-    "booth": {"di": "di3", "relays": ["r4"]},             # N2: zones 1, 6
+    "kitchen": {"di": "di3", "relays": ["r8", "r6"]},     # N1 (DI3, corrected 18 Nov): zones 2, 3 (+ 4, 5 via relay 6)
+    "booth": {"di": "di2", "relays": ["r4"]},             # N2 (DI2): zones 1, 6
     "living": {"di": "di4", "relays": ["r5"]},            # N3 lounge: zones 9, 10
 }
 ALL_RELAYS = ["r4", "r5", "r6", "r7", "r8"]

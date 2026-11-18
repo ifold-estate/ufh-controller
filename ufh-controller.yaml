@@ -845,8 +845,9 @@ display:
       // zones); Lounge relay 5.
       switch_::Switch *zones[6] = {id(relay7), id(relay8), id(relay6), id(relay4), id(relay4), id(relay5)};
       for (int i = 0; i < 6; i++) st.zone[i] = zones[i]->state;
-      // DI1-4: thermostats in Playroom, Kitchen, Booth, Lounge (on = calling for heat)
-      binary_sensor::BinarySensor *stats[4] = {id(di1), id(di2), id(di3), id(di4)};
+      // Thermostats, on = calling for heat: Playroom DI1, Kitchen DI3, Booth DI2, Lounge DI4 (Jon's
+      // corrected wiring, 18 Nov 2026: DI2 is the booth's pink wire, DI3 the kitchen's red).
+      binary_sensor::BinarySensor *stats[4] = {id(di1), id(di3), id(di2), id(di4)};
       for (int i = 0; i < 4; i++) st.room_calling[i] = stats[i]->state;
       // Relays are still switched by hand; the mixer may be automatic.
       st.mode = id(mixer_auto).state ? "AUTO" : "MANUAL";
@@ -884,7 +885,8 @@ interval:
           auto &d = heating_demand::instance();
           heating_demand::Settings ds;
           ds.r6 = heating_demand::R6Mode(id(relay6_mode).active_index().value_or(0));
-          const bool calls[4] = {id(di1).state, id(di2).state, id(di3).state, id(di4).state};
+          // heating_demand order: Playroom, Kitchen (N1), Booth (N2), Lounge (N3) = DI1, DI3, DI2, DI4.
+          const bool calls[4] = {id(di1).state, id(di3).state, id(di2).state, id(di4).state};
           d.update(calls, 1.0f, ds);
           auto set = [](switch_::Switch *r, bool on, const char *name) {
             if (r->state == on) return;

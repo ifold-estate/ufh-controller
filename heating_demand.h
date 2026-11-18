@@ -1,7 +1,7 @@
 // Thermostat-driven demand: which zone valves are open, and when the floor pump runs.
 //
-// Map (Jon, 8 Nov 2026): DI1 playroom T4 -> relay 7 (zones 7, 8); DI2 kitchen N1 -> relay 8 (2, 3);
-// DI3 booth N2 -> relay 4 (1, 6); DI4 lounge N3 -> relay 5 (9, 10); relay 6 (kitchen centre, 4, 5)
+// Map (Jon, 8 Nov 2026; inputs corrected 18 Nov): DI1 playroom T4 -> relay 7 (zones 7, 8); DI3 kitchen
+// N1 -> relay 8 (2, 3); DI2 booth N2 -> relay 4 (1, 6); DI4 lounge N3 -> relay 5 (9, 10); relay 6 (kitchen centre, 4, 5)
 // per "Relay 6 mode".
 //   - A zone valve opens while its thermostat calls. Openings are staggered (several cold thermal
 //     actuators at once blew the 24 Vac fuse on 6 Nov).
@@ -31,7 +31,7 @@ struct Settings {
 
 class Demand {
  public:
-  // calls[0..3] = DI1..DI4 (T4 playroom, N1 kitchen, N2 booth, N3 lounge). dt in seconds.
+  // calls[0..3] = T4 playroom, N1 kitchen, N2 booth, N3 lounge (= DI1, DI3, DI2, DI4). dt in seconds.
   void update(const bool calls[4], float dt, const Settings &c) {
     bool want[NZONES] = {};
     want[R7] = calls[0];

@@ -441,12 +441,16 @@ band/setpoint stays lower, and the concrete floors filter brief peaks). Over-tem
 maximum down one setting and will lower it further from the boiler-flow peaks we record.
 
 **Zone and thermostat map (Jon, 8 Nov; supersedes the earlier one-relay-at-a-time notes):**
+_Corrected 18 Nov 2026: DI2 is the booth (pink, N2) and DI3 the kitchen (red, N1); the 8 Nov table had
+them swapped, so until then the kitchen's call opened the booth's zones and vice versa. The firmware
+now feeds the demand logic and LCD in the order DI1, DI3, DI2, DI4. Room-by-room readings before
+18 Nov that relied on "Input 2/3" have the two rooms the other way round._
 
 | Thermostat | Input | Room | Relay | Manifold zones (solenoids) | Notes |
 |---|---|---|---|---|---|
 | T4, mechanical | DI1 (purple wire) | Playroom | 7 | 7, 8 | |
-| N1, Nest v1 | DI2 (pink) | Kitchen / conservatory | 8 | 2, 3 | |
-| N2, Nest v2 | DI3 (red) | Booth | 4 | 1, 6 | Zone 1's solenoid has failed (identified by elimination; cold corner); Jon may leave it open until replaced. Pipes to zones 2–5 run through this corridor |
+| N1, Nest v1 | DI3 (red) | Kitchen / conservatory | 8 | 2, 3 | |
+| N2, Nest v2 | DI2 (pink) | Booth | 4 | 1, 6 | Zone 1's solenoid has failed (identified by elimination; cold corner); Jon may leave it open until replaced. Pipes to zones 2–5 run through this corridor |
 | N3, Nest v1 | DI4 (orange) | Lounge | 5 | 9, 10 | |
 | none | – | Kitchen centre (cooking area) | 6 | 4, 5 | Naturally warm, and pipes to 2 and 3 run underneath; "Relay 6 mode" set to Follow N1 on 8 Nov 2026 (23:40): the kitchen loses a lot of heat and N1 stays low. A future virtual thermostat could average N1 and N2 |
 
