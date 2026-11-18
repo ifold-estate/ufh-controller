@@ -612,6 +612,14 @@ down; the full call only opens below 38 °C, 2 % per 30 s, capped at 50 %.
   and the measured share moves them to pulled (~5–8 min) if its pump isn't running. The integral
   resets on each curve switch.
 
+**Input 4 stuck ON (16–18 Nov 2026):** from 16 Nov 00:55 the controller reported Input 4 (lounge)
+ON for 44 h while the Living Room Nest was idle, the room reached 22 °C against 19, and Jon measured
+~0 Vac at the input with its LED off. A restart cleared it. Cause: ESPHome's GPIO binary sensor has
+been interrupt-driven by default since 2025, reading the pin only when an edge interrupt fires; the
+24 Vac input chatters at 100 Hz, and one missed final edge left the state stale with no further edges
+to correct it. DI1–4 are now polled (`use_interrupt: false`), so a wrong state can't outlast the
+filters.
+
 **Second controller (Jon, 8 Nov):** considering a second Waveshare PLC at the boiler-side 2-port
 valve / upstream controller location, to replace the "dumb" timer chain with direct control. Weeks
 away at best; staged mode is the work-around meanwhile.
