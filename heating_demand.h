@@ -71,7 +71,9 @@ class Demand {
     }
 
     for (int z = 0; z < NZONES; z++) any_open = any_open || (open_[z] && open_for_[z] >= c.actuator_s);
-    pump_ = any_open && (active_ || overrun_ < c.overrun_s);
+    // Run-on only continues a pump that was already running: a call shorter than the actuator time
+    // must not start the pump after it has ended (seen 20 Nov 2026 on a 40 s test request).
+    pump_ = any_open && (active_ || (pump_ && overrun_ < c.overrun_s));
   }
 
   bool valve(int z) const { return open_[z]; }

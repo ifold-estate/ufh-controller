@@ -47,7 +47,9 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install ESPHome
-        run: pip install esphome
+        # Pinned: a new ESPHome release only arrives when we choose it (2026.11.0 dropped a helper the
+        # servo driver used). Match the venv used for OTA flashes.
+        run: pip install esphome==2026.11.0
       - name: Compile
         run: esphome compile ${{ matrix.config }}.yaml
       - name: Upload firmware

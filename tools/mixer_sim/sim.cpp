@@ -383,6 +383,19 @@ void safety_checks() {
     assert(d.valve(heating_demand::R8) && d.valve(heating_demand::R6) && d.active());
     tick(120);
     assert(d.pump());
+
+    // A call shorter than the actuator time: the pump never starts, and the valves close after the
+    // run-on (20 Nov 2026: a 40 s request started the pump 80 s after it ended).
+    Demand d2;
+    bool calls2[4] = {false, true, false, false};
+    for (int i = 0; i < 40; i++) d2.update(calls2, 1, ds);
+    calls2[1] = false;
+    for (int i = 0; i < 189; i++) {
+      d2.update(calls2, 1, ds);
+      assert(!d2.pump());
+    }
+    for (int i = 0; i < 2; i++) d2.update(calls2, 1, ds);
+    assert(!d2.valve(heating_demand::R8) && !d2.valve(heating_demand::R6));
   }
   // On the cold end switch, with the estimate drifted a few % open: no more closing moves (8 Nov 19:47).
   {

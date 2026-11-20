@@ -659,6 +659,10 @@ one back within 1 s: ~1,600 relay cycles, no heat. So the request now goes throu
 - With Heating auto off the requests are ignored (the fail-safes still run).
 - "Zone demand <room>" binary sensors show thermostat OR request, for history and the thermal model.
 - Unit-tested in `tools/mixer_sim/sim.cpp`. HA design and the planner: `Handoffs/ufh-run-up-handoff.md`.
+- Flashed 20 Nov (commit `184cbf1`). A 40 s test request showed an older quirk: once the valves had
+  been open 2 min, the pump started during the run-on although the call had ended. Fixed: the run-on
+  only continues a pump that was already running. CI now pins ESPHome (2026.11.0), after an
+  unpinned release broke the servo driver build.
 
 **Second controller (Jon, 8 Nov):** considering a second Waveshare PLC at the boiler-side 2-port
 valve / upstream controller location, to replace the "dumb" timer chain with direct control. Weeks
