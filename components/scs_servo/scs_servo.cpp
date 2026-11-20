@@ -1,6 +1,7 @@
 #include "scs_servo.h"
 
 #include <algorithm>
+#include <cstdio>
 
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
@@ -349,7 +350,16 @@ bool SCSServo::transact_(uint8_t instruction, const std::vector<uint8_t> &params
   // our own echo (TX path works, servo silent), or garbage (baud rate or level shifter). Only logged
   // when it changes, since this repeats every poll while the servo is offline.
   std::string summary = echo_seen ? "echo of our packet, then " : "";
-  summary += rx.empty() ? "nothing" : format_hex_pretty(rx);
+  if (rx.empty()) {
+    summary += "nothing";
+  } else {
+    // Own formatter: ESPHome 2026.11 dropped format_hex_pretty(std::vector).
+    char hex[4];
+    for (size_t k = 0; k < rx.size(); k++) {
+      snprintf(hex, sizeof(hex), k ? ".%02X" : "%02X", rx[k]);
+      summary += hex;
+    }
+  }
   if (summary != this->last_failure_) {
     ESP_LOGD(TAG, "No valid reply from ID %u: received %s", this->servo_id_, summary.c_str());
     this->last_failure_ = summary;
