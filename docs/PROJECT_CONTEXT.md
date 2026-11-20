@@ -449,9 +449,9 @@ now feeds the demand logic and LCD in the order DI1, DI3, DI2, DI4. Room-by-room
 | Thermostat | Input | Room | Relay | Manifold zones (solenoids) | Notes |
 |---|---|---|---|---|---|
 | T4, mechanical | DI1 (purple wire) | Playroom | 7 | 7, 8 | |
-| N1, Nest v1 | DI3 (red) | Kitchen / conservatory | 8 | 2, 3 | |
-| N2, Nest v2 | DI2 (pink) | Booth | 4 | 1, 6 | Zone 1's solenoid has failed (identified by elimination; cold corner); Jon may leave it open until replaced. Pipes to zones 2–5 run through this corridor |
-| N3, Nest v1 | DI4 (orange) | Lounge | 5 | 9, 10 | |
+| N1, Nest Gen 2 on NoLongerEvil | DI3 (red) | Kitchen / conservatory | 8 | 2, 3 | |
+| N2, Nest v3, official integration | DI2 (pink) | Booth | 4 | 1, 6 | Zone 1's solenoid has failed (identified by elimination; cold corner); Jon may leave it open until replaced. Pipes to zones 2–5 run through this corridor |
+| N3, Nest Gen 2 on NoLongerEvil | DI4 (orange) | Lounge | 5 | 9, 10 | |
 | none | – | Kitchen centre (cooking area) | 6 | 4, 5 | Naturally warm, and pipes to 2 and 3 run underneath; "Relay 6 mode" set to Follow N1 on 8 Nov 2026 (23:40): the kitchen loses a lot of heat and N1 stays low. A future virtual thermostat could average N1 and N2 |
 
 Floor plan with zones and thermostat positions: Jon's sketch of 8 Nov (not in the repo).
@@ -644,6 +644,21 @@ been interrupt-driven by default since 2025, reading the pin only when an edge i
 24 Vac input chatters at 100 Hz, and one missed final edge left the state stale with no further edges
 to correct it. DI1–4 are now polled (`use_interrupt: false`), so a wrong state can't outlast the
 filters.
+
+**Aligned burn (20 Nov 2026):** HA plans extra on-time per room so the rooms heat together in two
+blocks a day, ending 06:00 and 18:00, and one boiler burn serves them all instead of each thermostat
+firing the boiler separately. (Jon's name; the HA thread first called it "run-up".) On its first
+night HA switched the zone relays directly, and with Heating auto on the controller switched each
+one back within 1 s: ~1,600 relay cycles, no heat. So the request now goes through the controller:
+- Switches "Aligned burn Playroom / Kitchen / Booth / Lounge" (`switch.heating_ufh_plc_aligned_burn_*`).
+  Each is ORed with that room's thermostat before `heating_demand`, so everything a thermostat drives
+  (valves, the stagger, pump, CFH, mixer) follows the request the same way. Kitchen also opens relay
+  6 while "Relay 6 mode" is "Follow N1".
+- Never restored at boot. Each clears after 255 min (the planner caps at 240), and all clear once
+  the API has had no client for 30 s. Changes and clears are logged at INFO (tag `burn`).
+- With Heating auto off the requests are ignored (the fail-safes still run).
+- "Zone demand <room>" binary sensors show thermostat OR request, for history and the thermal model.
+- Unit-tested in `tools/mixer_sim/sim.cpp`. HA design and the planner: `Handoffs/ufh-run-up-handoff.md`.
 
 **Second controller (Jon, 8 Nov):** considering a second Waveshare PLC at the boiler-side 2-port
 valve / upstream controller location, to replace the "dumb" timer chain with direct control. Weeks

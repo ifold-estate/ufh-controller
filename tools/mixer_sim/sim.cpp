@@ -344,6 +344,46 @@ void safety_checks() {
     run_for(40);
     assert(d.valve(R4) && d.valve(R6) && !d.valve(R8));
   }
+  // Aligned burn requests: 255 min limit, cleared 30 s after HA goes, ORed with the thermostat.
+  {
+    using heating_demand::AlignedBurn;
+    heating_demand::BurnSettings bs;
+    AlignedBurn b;
+    bool req[4] = {false, true, false, false};  // kitchen requested
+    for (int i = 0; i < 254 * 60; i++) assert(b.update(req, true, 1, bs) == 0);
+    assert(req[1]);
+    uint8_t cl = 0;
+    for (int i = 0; i < 61 && req[1]; i++) cl |= b.update(req, true, 1, bs);
+    assert(!req[1] && cl == 0x2);                       // expired at 255 min
+    req[1] = true;                                      // a fresh request starts its own clock
+    assert(b.update(req, true, 1, bs) == 0 && b.on_for(1) == 1);
+    req[3] = true;
+    for (int i = 0; i < 29; i++) assert(b.update(req, false, 1, bs) == 0);  // brief drop: kept
+    assert(b.update(req, true, 1, bs) == 0);           // HA back: the drop timer resets
+    for (int i = 0; i < 29; i++) b.update(req, false, 1, bs);
+    assert(req[1] && req[3]);
+    cl = b.update(req, false, 1, bs);                  // 30 s without HA: all cleared
+    assert(!req[1] && !req[3] && cl == 0xA);
+
+    // Kitchen request with relay 6 following N1: relays 8 and 6 open, pump and CFH demand follow.
+    using heating_demand::Demand; using heating_demand::R6Mode;
+    heating_demand::Settings ds;
+    ds.r6 = R6Mode::N1;
+    Demand d;
+    const bool thermostat[4] = {false, false, false, false};
+    bool request[4] = {false, true, false, false};
+    auto tick = [&](int n) {
+      for (int i = 0; i < n; i++) {
+        bool calls[4];
+        for (int k = 0; k < 4; k++) calls[k] = thermostat[k] || request[k];
+        d.update(calls, 1, ds);
+      }
+    };
+    tick(40);
+    assert(d.valve(heating_demand::R8) && d.valve(heating_demand::R6) && d.active());
+    tick(120);
+    assert(d.pump());
+  }
   // On the cold end switch, with the estimate drifted a few % open: no more closing moves (8 Nov 19:47).
   {
     Positioner pz;

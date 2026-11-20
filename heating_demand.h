@@ -102,4 +102,47 @@ inline Demand &instance() {
   return d;
 }
 
+// Aligned burn (20 Nov 2026). HA plans extra on-time for each room so the rooms heat together in
+// blocks ending at 06:00 and 18:00, and one boiler burn serves them all instead of each thermostat
+// firing it separately. A room's request is ORed with its thermostat, so it adds heat and never
+// blocks a call. Rooms in the same order as Demand::update's calls: Playroom, Kitchen, Booth, Lounge.
+// Fail-safes: a request clears after max_on_s, and all requests clear once HA has been gone for
+// lost_api_s (HA can't then switch them off itself).
+struct BurnSettings {
+  float max_on_s = 255 * 60;  // the planner's 240 min cap plus margin
+  float lost_api_s = 30;      // rides out a brief Wi-Fi drop
+};
+
+class AlignedBurn {
+ public:
+  // req[] is updated in place. Returns a bit per room whose request was cleared on this tick.
+  uint8_t update(bool req[4], bool api_connected, float dt, const BurnSettings &c) {
+    no_api_ = api_connected ? 0 : no_api_ + dt;
+    uint8_t cleared = 0;
+    for (int i = 0; i < 4; i++) {
+      if (!req[i]) {
+        on_for_[i] = 0;
+        continue;
+      }
+      on_for_[i] += dt;
+      if (on_for_[i] >= c.max_on_s || no_api_ >= c.lost_api_s) {
+        req[i] = false;
+        on_for_[i] = 0;
+        cleared |= 1 << i;
+      }
+    }
+    return cleared;
+  }
+  float on_for(int i) const { return on_for_[i]; }
+
+ protected:
+  float on_for_[4] = {};
+  float no_api_ = 0;
+};
+
+inline AlignedBurn &burn() {
+  static AlignedBurn b;
+  return b;
+}
+
 }  // namespace heating_demand

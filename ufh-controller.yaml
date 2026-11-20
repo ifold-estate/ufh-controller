@@ -242,6 +242,38 @@ switch:
       - lambda: 'if (!id(mixer_auto).state) id(mixer_auto).turn_on();'
     turn_off_action:
       - lambda: 'if (id(relay1).state) id(relay1).turn_off();'
+  # Aligned burn requests (heating_demand.h): HA sets these so the rooms heat together in blocks
+  # ending 06:00 and 18:00. Each is ORed with the room's thermostat (Kitchen also drives relay 6 while
+  # "Relay 6 mode" follows N1). Never restored at boot; cleared after 255 min, or 30 s after HA goes.
+  # Ignored while Heating auto is off.
+  - platform: template
+    id: burn_playroom
+    name: "Aligned burn Playroom"
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on: [logger.log: {level: INFO, tag: burn, format: "Aligned burn Playroom on"}]
+    on_turn_off: [logger.log: {level: INFO, tag: burn, format: "Aligned burn Playroom off"}]
+  - platform: template
+    id: burn_kitchen
+    name: "Aligned burn Kitchen"
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on: [logger.log: {level: INFO, tag: burn, format: "Aligned burn Kitchen on"}]
+    on_turn_off: [logger.log: {level: INFO, tag: burn, format: "Aligned burn Kitchen off"}]
+  - platform: template
+    id: burn_booth
+    name: "Aligned burn Booth"
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on: [logger.log: {level: INFO, tag: burn, format: "Aligned burn Booth on"}]
+    on_turn_off: [logger.log: {level: INFO, tag: burn, format: "Aligned burn Booth off"}]
+  - platform: template
+    id: burn_lounge
+    name: "Aligned burn Lounge"
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on: [logger.log: {level: INFO, tag: burn, format: "Aligned burn Lounge on"}]
+    on_turn_off: [logger.log: {level: INFO, tag: burn, format: "Aligned burn Lounge off"}]
   # Band mode: also drop CFH when the boiler flow reaches "Boiler cap" (off by default).
   - platform: template
     id: boiler_cap_on
@@ -379,6 +411,20 @@ binary_sensor:
     # through any gap < 1 s), then require 0.5 s steady. (The reverse order let only the odd sampling
     # beat through, so calling inputs flickered ~1 s on / 1 s off.)
     filters: [delayed_off: 1s, delayed_on: 500ms]
+  # Effective demand per room: thermostat OR aligned burn request (published by the demand loop).
+  # For history and the thermal model: shows when a room's valves were asked to open, and why.
+  - platform: template
+    id: zone_demand_playroom
+    name: "Zone demand Playroom"
+  - platform: template
+    id: zone_demand_kitchen
+    name: "Zone demand Kitchen"
+  - platform: template
+    id: zone_demand_booth
+    name: "Zone demand Booth"
+  - platform: template
+    id: zone_demand_lounge
+    name: "Zone demand Lounge"
   - platform: gpio
     id: di5
     name: "Input 5"
@@ -890,12 +936,30 @@ interval:
   - interval: 1s
     then:
       - lambda: |-
+          // heating_demand order: Playroom, Kitchen (N1), Booth (N2), Lounge (N3) = DI1, DI3, DI2, DI4.
+          // Aligned burn fail-safes run even with Heating auto off, so a request can't linger.
+          switch_::Switch *burns[4] = {id(burn_playroom), id(burn_kitchen), id(burn_booth), id(burn_lounge)};
+          bool req[4];
+          for (int i = 0; i < 4; i++) req[i] = burns[i]->state;
+          const uint8_t cleared = heating_demand::burn().update(
+              req, api::global_api_server->is_connected(), 1.0f, heating_demand::BurnSettings());
+          for (int i = 0; i < 4; i++)
+            if (cleared & (1 << i)) {
+              ESP_LOGI("burn", "%s: cleared (%s)", burns[i]->get_name().c_str(),
+                       api::global_api_server->is_connected() ? "255 min limit" : "HA disconnected");
+              burns[i]->turn_off();
+            }
+          const bool thermostat[4] = {id(di1).state, id(di3).state, id(di2).state, id(di4).state};
+          bool calls[4];
+          for (int i = 0; i < 4; i++) calls[i] = thermostat[i] || req[i];
+          binary_sensor::BinarySensor *zd[4] = {id(zone_demand_playroom), id(zone_demand_kitchen),
+                                                id(zone_demand_booth), id(zone_demand_lounge)};
+          for (int i = 0; i < 4; i++)
+            if (!zd[i]->has_state() || zd[i]->state != calls[i]) zd[i]->publish_state(calls[i]);
           if (!id(heating_auto).state) return;
           auto &d = heating_demand::instance();
           heating_demand::Settings ds;
           ds.r6 = heating_demand::R6Mode(id(relay6_mode).active_index().value_or(0));
-          // heating_demand order: Playroom, Kitchen (N1), Booth (N2), Lounge (N3) = DI1, DI3, DI2, DI4.
-          const bool calls[4] = {id(di1).state, id(di3).state, id(di2).state, id(di4).state};
           d.update(calls, 1.0f, ds);
           auto set = [](switch_::Switch *r, bool on, const char *name) {
             if (r->state == on) return;
